@@ -1,3 +1,5 @@
+import { getNativeCodec, type NativeFrameDecoder, nativeErrorMessage } from "./native-codec.ts";
+
 const FRAME_HEADER_LENGTH = 4;
 const MAX_UINT32 = 0xffff_ffff;
 const PAYLOAD_BLOCK_SIZE = 64 * 1024;
@@ -28,6 +30,8 @@ function resolveMaxFrameLength(options: FrameDecoderOptions | undefined): number
 export function encodeFrame(payload: Uint8Array): Uint8Array {
 	if (!(payload instanceof Uint8Array)) throw new TypeError("Frame payload must be a Uint8Array");
 	if (payload.byteLength > MAX_UINT32) throw new RangeError("Frame payload exceeds the unsigned 32-bit length limit");
+	const native = getNativeCodec();
+	if (native) return native.encodeFrame(payload);
 	const frame = new Uint8Array(FRAME_HEADER_LENGTH + payload.byteLength);
 	const length = payload.byteLength;
 	frame[0] = length >>> 24;
@@ -51,15 +55,26 @@ export class FrameDecoder {
 	private expectedPayloadLength: number | undefined;
 	private payloadLength = 0;
 	private state: DecoderState = "open";
+	private readonly native: NativeFrameDecoder | undefined;
 
 	constructor(options?: FrameDecoderOptions) {
 		this.maxFrameLength = resolveMaxFrameLength(options);
+		this.native = getNativeCodec()?.createFrameDecoder(this.maxFrameLength);
 	}
 
 	push(chunk: Uint8Array): Uint8Array[] {
 		if (this.state === "ended") throw new FrameError("Frame decoder has ended");
 		if (this.state === "failed") throw new FrameError("Frame decoder has failed");
 		if (!(chunk instanceof Uint8Array)) throw new TypeError("Frame chunk must be a Uint8Array");
+		if (this.native) {
+			try {
+				return this.native.push(chunk);
+			} catch (error) {
+				const message = nativeErrorMessage(error, "PI_FRAME_ERROR");
+				if (message === undefined) throw error;
+				this.fail(message);
+			}
+		}
 
 		const frames: Uint8Array[] = [];
 		let chunkOffset = 0;
@@ -132,6 +147,15 @@ export class FrameDecoder {
 	end(): void {
 		if (this.state === "ended") throw new FrameError("Frame decoder has ended");
 		if (this.state === "failed") throw new FrameError("Frame decoder has failed");
+		if (this.native) {
+			try {
+				this.native.end();
+			} catch (error) {
+				const message = nativeErrorMessage(error, "PI_FRAME_ERROR");
+				if (message === undefined) throw error;
+				this.fail(message);
+			}
+		}
 		if (this.headerLength !== 0 || this.expectedPayloadLength !== undefined) {
 			this.fail("Truncated frame at end of stream");
 		}

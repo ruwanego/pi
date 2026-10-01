@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/pi-native"]
+members = ["crates/pi-native", "crates/pi-protocol"]
 
 [workspace.package]
 version = "0.99.2"
@@ -13,6 +13,7 @@ rust-version = "1.85"
 napi = { version = "=3.14.0", default-features = false, features = ["napi8"] }
 napi-derive = "=3.6.10"
 napi-build = "=2.6.0"
+pi-protocol = { path = "crates/pi-protocol" }
 
 [profile.release]
 lto = true

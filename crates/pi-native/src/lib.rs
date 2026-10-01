@@ -1,5 +1,7 @@
 //! Native bridge for pi. Exports are loaded by `@earendil-works/pi-native`.
 
+mod protocol;
+
 use napi_derive::napi;
 
 /// Version of the native crate, used to verify the bridge is loaded.

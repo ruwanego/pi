@@ -19,7 +19,7 @@
 		"test": "fail"
 	},
 	"knownTestFailures": {
-		"note": "Union of two full runs (pristine v0.99.2 and RUST-000) in this environment. Tests marked flaky failed in only one run. A substitution must not fail any test outside this set.",
+		"note": "Union of full runs in this environment (pristine v0.99.2, RUST-000, RUST-001). Tests marked flaky failed in only some runs. A substitution must not fail any test outside this set.",
 		"packages/ai": {
 			"reason": "Live GitHub Copilot E2E tests run because local OAuth credentials exist; the network firewall breaks them.",
 			"tests": [
@@ -36,6 +36,7 @@
 				"test/stream.test.ts > Generate E2E Tests > GitHub Copilot Provider (claude-sonnet-4 via Anthropic Messages) > should handle thinking",
 				"test/stream.test.ts > Generate E2E Tests > GitHub Copilot Provider (claude-sonnet-4 via Anthropic Messages) > should handle tool calling",
 				"test/stream.test.ts > Generate E2E Tests > GitHub Copilot Provider (gpt-5.3-codex via OpenAI Completions) > should handle thinking",
+				"test/tokens.test.ts > Token Statistics on Abort > GitHub Copilot Provider > claude-sonnet-4 - should include token stats when aborted mid-stream",
 				"test/tool-call-without-result.test.ts > Tool Call Without Result Tests > GitHub Copilot Provider > claude-sonnet-4 - should filter out tool calls without corresponding tool results",
 				"test/total-tokens.test.ts > totalTokens field > GitHub Copilot (OAuth) > claude-sonnet-4 - should return totalTokens equal to sum of components",
 				"test/unicode-surrogate.test.ts > AI Providers Unicode Surrogate Pair Tests > GitHub Copilot Provider Unicode Handling > claude-sonnet-4 - should handle emoji in tool results",
@@ -74,6 +75,7 @@
 			"test/image-tool-result.test.ts > Tool Results with Images > GitHub Copilot Provider > claude-sonnet-4 - should handle tool result with only image",
 			"test/image-tool-result.test.ts > Tool Results with Images > GitHub Copilot Provider > claude-sonnet-4 - should handle tool result with text and image",
 			"test/session-manager/file-operations.test.ts > loadEntriesFromFile > opens session files larger than Node's max string length",
+			"test/tokens.test.ts > Token Statistics on Abort > GitHub Copilot Provider > claude-sonnet-4 - should include token stats when aborted mid-stream",
 			"test/tool-call-without-result.test.ts > Tool Call Without Result Tests > GitHub Copilot Provider > claude-sonnet-4 - should filter out tool calls without corresponding tool results",
 			"test/total-tokens.test.ts > totalTokens field > GitHub Copilot (OAuth) > claude-sonnet-4 - should return totalTokens equal to sum of components"
 		]

@@ -38,4 +38,6 @@ decoder.end();
 
 All envelope schemas reject unknown object properties, and codecs recursively reject non-JSON opaque payloads, including non-finite numbers, byte arrays, `undefined`, prototypes, and cycles. Envelope violations, malformed CBOR, and invalid framing throw `ProtocolValidationError`. Payload-specific adapters must perform their own semantic validation after decoding. Transports must preserve byte order. Peer authentication and authenticated service contexts are not implemented by the experimental transport.
 
+An alternative codec can be installed with `setNativeCodec()`. `@earendil-works/pi-native` provides a Rust implementation (`protocolCodec`) that produces the same bytes, values, and errors; the test suite runs against both. Frame decoders keep the codec that was active when they were constructed.
+
 Default limits are 16 MiB per CBOR payload/frame, 1,000,000 array elements or map entries, and 64 nested item levels. The protocol is experimental and has no compatibility guarantees.

@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Experimental `setNativeCodec()` / `getNativeCodec()` hook that routes CBOR and framing through an alternative implementation such as `protocolCodec` from `@earendil-works/pi-native` (Rust). The TypeScript codec remains the default.
+
 ## [0.99.2] - 2026-09-30
 
 ## [0.99.1] - 2026-09-29

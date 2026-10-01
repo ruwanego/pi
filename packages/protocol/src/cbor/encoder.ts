@@ -1,3 +1,4 @@
+import { getNativeCodec, nativeErrorMessage } from "../native-codec.ts";
 import {
 	CborError,
 	type CborOptions,
@@ -210,6 +211,15 @@ function encodeValue(
 /** Encodes the protocol's strict, definite-length RFC 8949 subset. */
 export function encodeCbor(value: unknown, options?: CborOptions): Uint8Array {
 	const resolved = resolveOptions(options);
+	const native = getNativeCodec();
+	if (native) {
+		try {
+			return native.encodeCbor(value, resolved);
+		} catch (error) {
+			const message = nativeErrorMessage(error, "PI_CBOR_ERROR");
+			throw message === undefined ? error : new CborError(message);
+		}
+	}
 	const writer = new CborWriter(resolved.maxByteLength);
 	encodeValue(writer, value, resolved, 0, new Set<object>());
 	return writer.finish();

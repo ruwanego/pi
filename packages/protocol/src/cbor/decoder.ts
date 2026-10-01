@@ -1,3 +1,4 @@
+import { getNativeCodec, nativeErrorMessage } from "../native-codec.ts";
 import {
 	CborError,
 	type CborOptions,
@@ -163,6 +164,15 @@ export function decodeCbor(bytes: Uint8Array, options?: CborOptions): unknown {
 	const resolved = resolveOptions(options);
 	if (bytes.byteLength > resolved.maxByteLength) {
 		throw new CborError(`CBOR byte length exceeds configured limit of ${resolved.maxByteLength}`);
+	}
+	const native = getNativeCodec();
+	if (native) {
+		try {
+			return native.decodeCbor(bytes, resolved);
+		} catch (error) {
+			const message = nativeErrorMessage(error, "PI_CBOR_ERROR");
+			throw message === undefined ? error : new CborError(message);
+		}
 	}
 	return new CborReader(bytes, resolved).decode();
 }

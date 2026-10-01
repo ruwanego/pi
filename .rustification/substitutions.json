@@ -16,13 +16,31 @@
 		{
 			"id": "RUST-001",
 			"title": "packages/protocol CBOR + framing",
-			"status": "planned",
+			"status": "done",
 			"crates": [
-				"pi-protocol"
+				"pi-protocol",
+				"pi-native"
 			],
 			"packages": [
-				"packages/protocol"
-			]
+				"packages/protocol",
+				"packages/native"
+			],
+			"behaviourChange": false,
+			"enabledByDefault": false,
+			"summary": "Rust CBOR subset + framing behind setNativeCodec(protocolCodec). The TypeScript codec stays the default; the protocol test suite runs against both, plus a differential fuzz suite.",
+			"parity": "packages/protocol/test/native-parity.test.ts",
+			"benchmark": {
+				"note": "Rust/TS time ratio, linux-x64, Node 22.20; lower is faster",
+				"encodeSmallEnvelope": 0.6,
+				"decodeSmallEnvelope": 0.91,
+				"encode5kObjects": 0.78,
+				"decode5kObjects": 1.02,
+				"encode1MBText": 1.19,
+				"decode1MBText": 1.04,
+				"encode1MBBytes": 0.54,
+				"decode1MBBytes": 1.69,
+				"frames1000Messages": 1.13
+			}
 		},
 		{
 			"id": "RUST-002",

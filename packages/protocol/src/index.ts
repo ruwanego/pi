@@ -1,6 +1,7 @@
 export * from "./cbor/index.ts";
 export * from "./codec.ts";
 export * from "./framing.ts";
+export { getNativeCodec, type NativeCodec, type NativeFrameDecoder, setNativeCodec } from "./native-codec.ts";
 export {
 	type AttachmentEnvelope,
 	type CancelEnvelope,

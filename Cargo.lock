@@ -210,7 +210,12 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "pi-protocol",
 ]
+
+[[package]]
+name = "pi-protocol"
+version = "0.99.2"
 
 [[package]]
 name = "pin-project-lite"

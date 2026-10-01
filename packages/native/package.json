@@ -1,0 +1,39 @@
+{
+	"name": "@earendil-works/pi-native",
+	"version": "0.99.2",
+	"private": true,
+	"description": "Rust N-API bridge for pi",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"prebuilds/**/*.node",
+		"README.md"
+	],
+	"scripts": {
+		"clean": "shx rm -rf dist prebuilds",
+		"build": "npm run build:native && tsc -p tsconfig.build.json",
+		"build:native": "node scripts/build-native.mjs",
+		"test": "node --test --test-reporter=dot --test-reporter-destination=stdout test/*.test.ts"
+	},
+	"author": "Earendil Works",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/earendil-works/pi.git",
+		"directory": "packages/native"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"devDependencies": {
+		"shx": "0.4.0"
+	}
+}

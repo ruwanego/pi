@@ -1,0 +1,81 @@
+{
+	"upstream": {
+		"repository": "earendil-works/pi",
+		"tag": "v0.99.2",
+		"commit": "005af57d88ee23b33778f343a9595b32e67ff788",
+		"branch": "upstream-stable"
+	},
+	"recordedAt": "2026-10-01",
+	"environment": {
+		"os": "Linux (WSL2)",
+		"node": "v22.20.0",
+		"npm": "11.6.2",
+		"rustc": "1.98.1"
+	},
+	"results": {
+		"build": "pass",
+		"check": "pass",
+		"cargoTest": "pass",
+		"test": "fail"
+	},
+	"knownTestFailures": {
+		"note": "Union of two full runs (pristine v0.99.2 and RUST-000) in this environment. Tests marked flaky failed in only one run. A substitution must not fail any test outside this set.",
+		"packages/ai": {
+			"reason": "Live GitHub Copilot E2E tests run because local OAuth credentials exist; the network firewall breaks them.",
+			"tests": [
+				"test/anthropic-eager-tool-input-e2e.test.ts > Anthropic Messages eager tool input streaming E2E > forced eager_input_streaming probe > github-copilot/claude-sonnet-4.6 accepts forced eager_input_streaming",
+				"test/context-overflow.test.ts > Context overflow error handling > GitHub Copilot (OAuth) > Google model - should detect overflow via isContextOverflow",
+				"test/context-overflow.test.ts > Context overflow error handling > GitHub Copilot (OAuth) > claude-sonnet-4 - should detect overflow via isContextOverflow",
+				"test/image-tool-result.test.ts > Tool Results with Images > GitHub Copilot Provider > claude-sonnet-4 - should handle tool result with only image",
+				"test/image-tool-result.test.ts > Tool Results with Images > GitHub Copilot Provider > claude-sonnet-4 - should handle tool result with text and image",
+				"test/responseid.test.ts > responseId E2E Tests > GitHub Copilot Provider > Anthropic path should expose responseId",
+				"test/stream.test.ts > Generate E2E Tests > GitHub Copilot Provider (claude-sonnet-4 via Anthropic Messages) > should complete basic text generation",
+				"test/stream.test.ts > Generate E2E Tests > GitHub Copilot Provider (claude-sonnet-4 via Anthropic Messages) > should handle image input",
+				"test/stream.test.ts > Generate E2E Tests > GitHub Copilot Provider (claude-sonnet-4 via Anthropic Messages) > should handle multi-turn with thinking and tools",
+				"test/stream.test.ts > Generate E2E Tests > GitHub Copilot Provider (claude-sonnet-4 via Anthropic Messages) > should handle streaming",
+				"test/stream.test.ts > Generate E2E Tests > GitHub Copilot Provider (claude-sonnet-4 via Anthropic Messages) > should handle thinking",
+				"test/stream.test.ts > Generate E2E Tests > GitHub Copilot Provider (claude-sonnet-4 via Anthropic Messages) > should handle tool calling",
+				"test/stream.test.ts > Generate E2E Tests > GitHub Copilot Provider (gpt-5.3-codex via OpenAI Completions) > should handle thinking",
+				"test/tool-call-without-result.test.ts > Tool Call Without Result Tests > GitHub Copilot Provider > claude-sonnet-4 - should filter out tool calls without corresponding tool results",
+				"test/total-tokens.test.ts > totalTokens field > GitHub Copilot (OAuth) > claude-sonnet-4 - should return totalTokens equal to sum of components",
+				"test/unicode-surrogate.test.ts > AI Providers Unicode Surrogate Pair Tests > GitHub Copilot Provider Unicode Handling > claude-sonnet-4 - should handle emoji in tool results",
+				"test/unicode-surrogate.test.ts > AI Providers Unicode Surrogate Pair Tests > GitHub Copilot Provider Unicode Handling > claude-sonnet-4 - should handle real-world LinkedIn comment data with emoji",
+				"test/unicode-surrogate.test.ts > AI Providers Unicode Surrogate Pair Tests > GitHub Copilot Provider Unicode Handling > claude-sonnet-4 - should handle unpaired high surrogate (0xD83D) in tool results"
+			]
+		},
+		"packages/coding-agent": {
+			"reason": "Clipboard tests pick up the WSL display environment; the rest are timing-sensitive under parallel load.",
+			"tests": [
+				"test/agent-session-concurrent.test.ts > AgentSession concurrent prompt guard > should allow followUp() while streaming",
+				"test/agent-session-concurrent.test.ts > AgentSession concurrent prompt guard > should allow steer() while streaming",
+				"test/agent-session-concurrent.test.ts > AgentSession concurrent prompt guard > should throw when prompt() called while streaming",
+				"test/auth-storage.test.ts > AuthStorage > keeps a coalesced reload alive while another credential reader is waiting",
+				"test/clipboard-image.test.ts > readClipboardImage > X11 does not probe image types when TARGETS fails",
+				"test/clipboard-image.test.ts > readClipboardImage > X11 does not probe unadvertised image types",
+				"test/clipboard-image.test.ts > readClipboardImage > linux: propagates native transfer errors without fallback",
+				"test/clipboard-image.test.ts > readClipboardImage > native X11 result null stops fallback",
+				"test/clipboard-image.test.ts > readClipboardImage > native X11 result {\"type\":\"Buffer\",\"data\":[137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82]} stops fallback",
+				"test/clipboard-image.test.ts > readClipboardImage > native X11 result {} stops fallback",
+				"test/clipboard-image.test.ts > readClipboardImage > wayland: command image present=false stops fallback",
+				"test/clipboard-image.test.ts > readClipboardImage > x11: command image present=false stops fallback",
+				"test/clipboard-image.test.ts > readClipboardImage > x11: command image present=true stops fallback",
+				"test/clipboard.test.ts > copyToClipboard > display-less Linux falls back to OSC 52",
+				"test/clipboard.test.ts > copyToClipboard > local Linux failure does not report an unverified OSC 52 write as success",
+				"test/clipboard.test.ts > copyToClipboard > reports the Wayland clipboard tool instead of the X11 fallback",
+				"test/experimental-remote-runtime.test.ts > experimental durable server composition > passes client plugin packages to a cold server and restores them for its next generation",
+				"test/experimental-remote-runtime.test.ts > experimental durable server composition > retires a cold server after its only Session attachment disconnects",
+				"test/session-manager/file-operations.test.ts > loadEntriesFromFile > opens session files larger than Node's max string length"
+			]
+		},
+		"flaky": [
+			"test/agent-session-concurrent.test.ts > AgentSession concurrent prompt guard > should allow followUp() while streaming",
+			"test/agent-session-concurrent.test.ts > AgentSession concurrent prompt guard > should allow steer() while streaming",
+			"test/auth-storage.test.ts > AuthStorage > keeps a coalesced reload alive while another credential reader is waiting",
+			"test/image-tool-result.test.ts > Tool Results with Images > GitHub Copilot Provider > claude-sonnet-4 - should handle tool result with only image",
+			"test/image-tool-result.test.ts > Tool Results with Images > GitHub Copilot Provider > claude-sonnet-4 - should handle tool result with text and image",
+			"test/session-manager/file-operations.test.ts > loadEntriesFromFile > opens session files larger than Node's max string length",
+			"test/tool-call-without-result.test.ts > Tool Call Without Result Tests > GitHub Copilot Provider > claude-sonnet-4 - should filter out tool calls without corresponding tool results",
+			"test/total-tokens.test.ts > totalTokens field > GitHub Copilot (OAuth) > claude-sonnet-4 - should return totalTokens equal to sum of components"
+		]
+	}
+}

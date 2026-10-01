@@ -1,0 +1,52 @@
+{
+	"substitutions": [
+		{
+			"id": "RUST-000",
+			"title": "Native bridge bootstrap",
+			"status": "done",
+			"crates": [
+				"pi-native"
+			],
+			"packages": [
+				"packages/native"
+			],
+			"behaviourChange": false,
+			"summary": "Rust workspace + @earendil-works/pi-native N-API loader exposing rustVersion(). Nothing in Pi depends on it yet."
+		},
+		{
+			"id": "RUST-001",
+			"title": "packages/protocol CBOR + framing",
+			"status": "planned",
+			"crates": [
+				"pi-protocol"
+			],
+			"packages": [
+				"packages/protocol"
+			]
+		},
+		{
+			"id": "RUST-002",
+			"title": "coding-agent find",
+			"status": "planned",
+			"packages": [
+				"packages/coding-agent"
+			]
+		},
+		{
+			"id": "RUST-003",
+			"title": "coding-agent grep",
+			"status": "planned",
+			"packages": [
+				"packages/coding-agent"
+			]
+		},
+		{
+			"id": "RUST-004",
+			"title": "pi-ai OpenAI-compatible transport",
+			"status": "planned",
+			"packages": [
+				"packages/ai"
+			]
+		}
+	]
+}

@@ -3,7 +3,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { describe, it } from "node:test";
-import native, { findFiles, grepFiles, loadNative, protocolCodec, rustVersion } from "../src/index.ts";
+import native, {
+	findFiles,
+	grepFiles,
+	loadNative,
+	parseStreamingJsonFast,
+	protocolCodec,
+	rustVersion,
+} from "../src/index.ts";
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
 	version: string;
@@ -103,5 +110,22 @@ describe("grepFiles", () => {
 		await assert.rejects(grepFiles(request(tmpdir(), "(")), {
 			message: "rg: regex parse error:\n    (?:()\n    ^\nerror: unclosed group",
 		});
+	});
+});
+
+describe("parseStreamingJsonFast", () => {
+	it("parses complete JSON and closes streamed prefixes", () => {
+		assert.deepStrictEqual(parseStreamingJsonFast('{"a":[1,"x"]}'), { a: [1, "x"] });
+		assert.deepStrictEqual(parseStreamingJsonFast('{"path":"a.ts","content":"line\\n'), {
+			path: "a.ts",
+			content: "line\n",
+		});
+		const content = "y".repeat(5000);
+		assert.deepStrictEqual(parseStreamingJsonFast(`{"content":"${content}`), { content });
+	});
+
+	it("defers inputs it does not handle", () => {
+		assert.strictEqual(parseStreamingJsonFast('{"a":"bad \\q"}'), undefined);
+		assert.strictEqual(parseStreamingJsonFast("12"), undefined);
 	});
 });

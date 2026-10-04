@@ -6,6 +6,7 @@
 
 - Experimental `setNativeFind()` hook that runs the default `find` tool search through an alternative to the fd binary, such as `findFiles` from `@ruwanego/pi-native` (Rust). fd remains the default.
 - Experimental `setNativeGrep()` hook that runs the default `grep` tool search through an alternative to the ripgrep binary, such as `grepFiles` from `@ruwanego/pi-native` (Rust). ripgrep remains the default.
+- `PI_RUST=1` also enables the Rust streaming tool-call argument parser in pi-ai.
 - Experimental `PI_RUST=1` environment variable and `enableRustFeatures()` / `disableRustFeatures()` to switch every Rust implementation from `@ruwanego/pi-native` on or off at once.
 
 ## [0.99.2] - 2026-09-30

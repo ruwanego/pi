@@ -1,5 +1,6 @@
+import { setNativeStreamingJsonParser } from "@earendil-works/pi-ai";
 import { setNativeCodec } from "@earendil-works/pi-protocol";
-import { findFiles, grepFiles, loadNative, protocolCodec } from "@ruwanego/pi-native";
+import { findFiles, grepFiles, loadNative, parseStreamingJsonFast, protocolCodec } from "@ruwanego/pi-native";
 import { setNativeFind } from "./tools/find.ts";
 import { setNativeGrep } from "./tools/grep.ts";
 
@@ -8,6 +9,7 @@ import { setNativeGrep } from "./tools/grep.ts";
  *
  * - `find` tool search (RUST-002), instead of the fd binary
  * - `grep` tool search (RUST-003), instead of the ripgrep binary
+ * - streaming tool-call argument parsing in pi-ai (RUST-004)
  * - pi-protocol CBOR and framing (RUST-001), instead of the TypeScript codec
  *
  * Loads the addon first, so it throws without changing anything when the addon has not been built for this
@@ -17,6 +19,7 @@ export function enableRustFeatures(): void {
 	loadNative();
 	setNativeFind(findFiles);
 	setNativeGrep(grepFiles);
+	setNativeStreamingJsonParser(parseStreamingJsonFast);
 	setNativeCodec(protocolCodec);
 }
 
@@ -24,5 +27,6 @@ export function enableRustFeatures(): void {
 export function disableRustFeatures(): void {
 	setNativeFind(undefined);
 	setNativeGrep(undefined);
+	setNativeStreamingJsonParser(undefined);
 	setNativeCodec(undefined);
 }

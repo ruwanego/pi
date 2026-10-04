@@ -83,7 +83,7 @@ These variables are read by Pi itself:
 | `PI_PACKAGE_DIR` | Override the package directory, useful for Nix/Guix store paths |
 | `PI_OFFLINE` | Disable automatic network activity, including model catalog refreshes |
 | `PI_SKIP_VERSION_CHECK` | Disable the `pi.dev` latest-version request |
-| `PI_RUST` | Set to `1` to use the experimental Rust implementations from `@ruwanego/pi-native` (the `find` and `grep` tool searches and the pi-protocol codec). Pi warns and keeps the default implementations when the addon is not built |
+| `PI_RUST` | Set to `1` to use the experimental Rust implementations from `@ruwanego/pi-native` (the `find` and `grep` tool searches, streaming tool-call argument parsing, and the pi-protocol codec). Pi warns and keeps the default implementations when the addon is not built |
 | `PI_TELEMETRY` | Override install/update telemetry and provider attribution headers: `1`/`true`/`yes` or `0`/`false`/`no` |
 | `PI_CACHE_RETENTION` | Set to `long` for extended provider prompt caching where supported |
 | `PI_SHARE_VIEWER_URL` | Override the base URL used by `/share` |

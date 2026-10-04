@@ -19,7 +19,7 @@
 		"test": "fail"
 	},
 	"knownTestFailures": {
-		"note": "Union of full runs in this environment (pristine v0.99.2, RUST-000, RUST-001, RUST-002). Tests marked flaky failed in only some runs. A substitution must not fail any test outside this set.",
+		"note": "Union of full runs in this environment (pristine v0.99.2, RUST-000, RUST-001, RUST-002, RUST-003, RUST-004). Tests marked flaky failed in only some runs. A substitution must not fail any test outside this set.",
 		"packages/ai": {
 			"reason": "Live GitHub Copilot E2E tests run because local OAuth credentials exist; the network firewall breaks them.",
 			"tests": [
@@ -72,15 +72,19 @@
 			"test/agent-session-concurrent.test.ts > AgentSession concurrent prompt guard > should allow followUp() while streaming",
 			"test/agent-session-concurrent.test.ts > AgentSession concurrent prompt guard > should allow steer() while streaming",
 			"test/auth-storage.test.ts > AuthStorage > keeps a coalesced reload alive while another credential reader is waiting",
+			"test/experimental-remote-runtime.test.ts > experimental durable server composition > composes management attachment with Session service hydration",
+			"test/experimental-remote-runtime.test.ts > experimental durable server composition > fences superseded attachment hydration by attachment generation",
 			"test/experimental-remote-runtime.test.ts > experimental durable server composition > serializes concurrent cold activation and retires after both clients leave",
 			"test/extensions-discovery.test.ts > extensions discovery > discovers direct .ts files in extensions/",
 			"test/image-tool-result.test.ts > Tool Results with Images > GitHub Copilot Provider > claude-sonnet-4 - should handle tool result with only image",
 			"test/image-tool-result.test.ts > Tool Results with Images > GitHub Copilot Provider > claude-sonnet-4 - should handle tool result with text and image",
+			"test/radius-oauth.test.ts > Radius OAuth > exchanges the browser callback code before showing the sign-in page",
 			"test/repo-conformance.test.ts > SqliteSessionRepo shared-container conformance > lifecycle > deletes closed sessions without affecting other sessions",
 			"test/repo-conformance.test.ts > SqliteSessionRepo shared-container conformance > ownership > rejects opening an already-open session",
 			"test/repo.test.ts > SqliteSessionRepo > encodes unsafe explicit IDs inside the repository directory and round-trips them",
 			"test/repo.test.ts > SqliteSessionRepo > waits for every Session close and reports one or multiple failures after settlement",
 			"test/session-manager/file-operations.test.ts > loadEntriesFromFile > opens session files larger than Node's max string length",
+			"test/state-fuzz.test.ts > converges across randomized prepared revisions",
 			"test/suite/agent-session-mcp.test.ts > AgentSession MCP integration > exposes codemode-only MCP tools through codemode and hides them from the model",
 			"test/suite/agent-session-mcp.test.ts > AgentSession MCP integration > keeps codemode-only MCP tools callable across tree navigation",
 			"test/suite/agent-session-mcp.test.ts > AgentSession MCP integration > routes tools whose names differ only in - and _ (reverse: false)",

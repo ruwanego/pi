@@ -389,6 +389,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "pi-json"
+version = "0.99.2"
+
+[[package]]
 name = "pi-native"
 version = "0.99.2"
 dependencies = [
@@ -397,6 +401,7 @@ dependencies = [
  "napi-derive",
  "pi-find",
  "pi-grep",
+ "pi-json",
  "pi-protocol",
 ]
 

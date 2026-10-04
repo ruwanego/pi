@@ -22,7 +22,7 @@ use pi_protocol::framing::{self, FrameError};
 const CBOR_ERROR_CODE: &str = "PI_CBOR_ERROR";
 const FRAME_ERROR_CODE: &str = "PI_FRAME_ERROR";
 
-enum Failure {
+pub(crate) enum Failure {
 	Cbor(String),
 	Frame(String),
 	/// A JavaScript exception is pending and must propagate as-is.
@@ -42,9 +42,9 @@ impl From<FrameError> for Failure {
 	}
 }
 
-type Outcome<T> = std::result::Result<T, Failure>;
+pub(crate) type Outcome<T> = std::result::Result<T, Failure>;
 
-fn throw(env: sys::napi_env, failure: Failure) -> Error {
+pub(crate) fn throw(env: sys::napi_env, failure: Failure) -> Error {
 	let (code, message) = match failure {
 		Failure::Pending => return Error::new(Status::PendingException, String::new()),
 		Failure::Napi(status) => {
@@ -63,7 +63,7 @@ fn throw(env: sys::napi_env, failure: Failure) -> Error {
 	Error::new(Status::PendingException, String::new())
 }
 
-fn check(env: sys::napi_env, status: sys::napi_status) -> Outcome<()> {
+pub(crate) fn check(env: sys::napi_env, status: sys::napi_status) -> Outcome<()> {
 	if status == sys::Status::napi_ok {
 		return Ok(());
 	}
@@ -79,8 +79,8 @@ fn check(env: sys::napi_env, status: sys::napi_status) -> Outcome<()> {
 
 /// Thin safe wrappers over the Node-API calls the codec needs.
 #[derive(Clone, Copy)]
-struct Js {
-	env: sys::napi_env,
+pub(crate) struct Js {
+	pub(crate) env: sys::napi_env,
 }
 
 impl Js {
@@ -90,7 +90,7 @@ impl Js {
 		Ok(result)
 	}
 
-	fn named(self, object: sys::napi_value, name: &str) -> Outcome<sys::napi_value> {
+	pub(crate) fn named(self, object: sys::napi_value, name: &str) -> Outcome<sys::napi_value> {
 		let name = CString::new(name).expect("static name");
 		let mut result = ptr::null_mut();
 		check(self.env, unsafe {
@@ -99,7 +99,7 @@ impl Js {
 		Ok(result)
 	}
 
-	fn get(self, object: sys::napi_value, key: sys::napi_value) -> Outcome<sys::napi_value> {
+	pub(crate) fn get(self, object: sys::napi_value, key: sys::napi_value) -> Outcome<sys::napi_value> {
 		let mut result = ptr::null_mut();
 		check(self.env, unsafe {
 			sys::napi_get_property(self.env, object, key, &mut result)
@@ -107,7 +107,7 @@ impl Js {
 		Ok(result)
 	}
 
-	fn element(self, object: sys::napi_value, index: u32) -> Outcome<sys::napi_value> {
+	pub(crate) fn element(self, object: sys::napi_value, index: u32) -> Outcome<sys::napi_value> {
 		let mut result = ptr::null_mut();
 		check(self.env, unsafe {
 			sys::napi_get_element(self.env, object, index, &mut result)
@@ -115,7 +115,7 @@ impl Js {
 		Ok(result)
 	}
 
-	fn call(
+	pub(crate) fn call(
 		self,
 		function: sys::napi_value,
 		this: sys::napi_value,
@@ -176,7 +176,7 @@ impl Js {
 	}
 
 	/// Length in UTF-16 code units, without copying the string.
-	fn utf16_length(self, value: sys::napi_value) -> Outcome<usize> {
+	pub(crate) fn utf16_length(self, value: sys::napi_value) -> Outcome<usize> {
 		let mut length = 0;
 		check(self.env, unsafe {
 			sys::napi_get_value_string_utf16(self.env, value, ptr::null_mut(), 0, &mut length)
@@ -186,7 +186,7 @@ impl Js {
 
 	/// Writes the string as UTF-8 into `out`, replacing lone surrogates with U+FFFD. `capacity` must be at least
 	/// the UTF-8 length (three bytes per UTF-16 code unit always suffices).
-	fn utf8_into(self, value: sys::napi_value, capacity: usize, out: &mut Vec<u8>) -> Outcome<()> {
+	pub(crate) fn utf8_into(self, value: sys::napi_value, capacity: usize, out: &mut Vec<u8>) -> Outcome<()> {
 		out.clear();
 		out.reserve(capacity + 1);
 		let mut written = 0;
@@ -206,7 +206,7 @@ impl Js {
 
 	/// Creates a string from UTF-8. ASCII uses the Latin-1 constructor (a plain copy); long non-ASCII text is
 	/// transcoded to UTF-16 here, which is faster than V8's UTF-8 constructor.
-	fn text(self, value: &str) -> Outcome<sys::napi_value> {
+	pub(crate) fn text(self, value: &str) -> Outcome<sys::napi_value> {
 		if !value.is_ascii() {
 			if value.len() < LONG_TEXT_LENGTH {
 				return self.string(value);
@@ -230,7 +230,7 @@ impl Js {
 		Ok(result)
 	}
 
-	fn string(self, value: &str) -> Outcome<sys::napi_value> {
+	pub(crate) fn string(self, value: &str) -> Outcome<sys::napi_value> {
 		let mut result = ptr::null_mut();
 		check(self.env, unsafe {
 			sys::napi_create_string_utf8(
@@ -297,7 +297,7 @@ impl Js {
 		Ok(Some(unsafe { std::slice::from_raw_parts(data as *const u8, length) }))
 	}
 
-	fn open_scope(self) -> Outcome<Scope> {
+	pub(crate) fn open_scope(self) -> Outcome<Scope> {
 		let mut scope = ptr::null_mut();
 		check(self.env, unsafe { sys::napi_open_handle_scope(self.env, &mut scope) })?;
 		Ok(Scope { env: self.env, scope })
@@ -305,7 +305,7 @@ impl Js {
 }
 
 /// Releases handles created inside one container element.
-struct Scope {
+pub(crate) struct Scope {
 	env: sys::napi_env,
 	scope: sys::napi_handle_scope,
 }
@@ -799,7 +799,7 @@ thread_local! {
 	static JSON_PARSE: std::cell::Cell<Option<(sys::napi_env, sys::napi_ref)>> = const { std::cell::Cell::new(None) };
 }
 
-fn json_parse(js: Js) -> Outcome<sys::napi_value> {
+pub(crate) fn json_parse(js: Js) -> Outcome<sys::napi_value> {
 	if let Some((env, reference)) = JSON_PARSE.get()
 		&& env == js.env
 	{

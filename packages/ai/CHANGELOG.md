@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Experimental `setNativeStreamingJsonParser()` hook that runs `parseStreamingJson` through a faster implementation first, such as `parseStreamingJsonFast` from `@ruwanego/pi-native` (Rust). Streaming tool calls re-parse their growing arguments on every delta; with the Rust parser a 100 KB `write` call takes 1.2 s of CPU instead of 15 s. The TypeScript implementation remains the default.
+
 ## [0.99.2] - 2026-09-30
 
 ### Added

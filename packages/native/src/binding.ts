@@ -57,6 +57,7 @@ export interface NativeBinding {
 	NativeFrameDecoder: new (maxFrameLength: number) => NativeFrameDecoderHandle;
 	NativeFindSearch: new (options: NativeFindOptions) => NativeFindSearchHandle;
 	NativeGrepSearch: new (options: NativeGrepOptions) => NativeGrepSearchHandle;
+	parseStreamingJsonFast(input: string): unknown;
 }
 
 const cjsRequire = createRequire(import.meta.url);

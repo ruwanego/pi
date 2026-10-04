@@ -16,6 +16,7 @@ napi.workspace = true
 napi-derive.workspace = true
 pi-find.workspace = true
 pi-grep.workspace = true
+pi-json.workspace = true
 pi-protocol.workspace = true
 
 [build-dependencies]

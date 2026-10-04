@@ -102,11 +102,40 @@
 		},
 		{
 			"id": "RUST-004",
-			"title": "pi-ai OpenAI-compatible transport",
-			"status": "planned",
+			"title": "pi-ai streaming tool-call JSON parsing",
+			"status": "done",
+			"crates": [
+				"pi-json",
+				"pi-native"
+			],
 			"packages": [
-				"packages/ai"
-			]
+				"packages/ai",
+				"packages/native"
+			],
+			"behaviourChange": false,
+			"enabledByDefault": false,
+			"summary": "Rust fast path for parseStreamingJson behind setNativeStreamingJsonParser(parseStreamingJsonFast); also enabled by PI_RUST=1. Complete JSON and well-formed object/array prefixes are closed the way partial-json does and built with V8's JSON.parse, with long strings patched in; anything else (repairs, partial-json quirks, __proto__, split surrogate pairs) returns undefined and runs the TypeScript implementation.",
+			"parity": "packages/ai/test/json-parse-native-parity.test.ts",
+			"replaces": "The planned 'pi-ai OpenAI-compatible transport' was dropped: processing a streamed response costs 8-13 µs per token (under 0.2% of the time between tokens), and a Rust HTTP stack would have to replicate undici's proxy, timeout, retry and TLS trust behavior. Profiling instead found parseStreamingJson re-parsing growing tool-call arguments on every delta (quadratic).",
+			"benchmark": {
+				"note": "CPU time to stream one write tool call through openai-completions in 16-character argument deltas, TypeScript vs Rust parser, linux-x64, Node 22.20",
+				"write5KB": {
+					"typescriptMs": 45,
+					"rustMs": 14
+				},
+				"write20KB": {
+					"typescriptMs": 554,
+					"rustMs": 73
+				},
+				"write50KB": {
+					"typescriptMs": 3599,
+					"rustMs": 338
+				},
+				"write100KB": {
+					"typescriptMs": 14837,
+					"rustMs": 1191
+				}
+			}
 		}
 	]
 }

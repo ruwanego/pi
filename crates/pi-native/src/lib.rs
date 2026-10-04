@@ -2,6 +2,7 @@
 
 mod find;
 mod grep;
+mod json;
 mod protocol;
 
 use napi_derive::napi;

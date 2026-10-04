@@ -95,6 +95,24 @@ export function parseJsonWithRepair<T>(json: string): T {
 }
 
 /**
+ * Alternative implementation of {@link parseStreamingJson}, e.g. `parseStreamingJsonFast` from `@ruwanego/pi-native`.
+ * It receives non-blank input and returns the identical result, or `undefined` to defer to the TypeScript
+ * implementation.
+ */
+export type NativeStreamingJsonParser = (partialJson: string) => unknown;
+
+let nativeStreamingJsonParser: NativeStreamingJsonParser | undefined;
+
+/**
+ * Experimental: routes {@link parseStreamingJson} through `parser` first, or back to the TypeScript implementation
+ * only when `undefined`. Streaming tool calls re-parse the growing arguments on every delta, so this is their main CPU
+ * cost for large arguments.
+ */
+export function setNativeStreamingJsonParser(parser: NativeStreamingJsonParser | undefined): void {
+	nativeStreamingJsonParser = parser;
+}
+
+/**
  * Attempts to parse potentially incomplete JSON during streaming.
  * Always returns a valid object, even if the JSON is incomplete.
  *
@@ -104,6 +122,10 @@ export function parseJsonWithRepair<T>(json: string): T {
 export function parseStreamingJson<T = Record<string, unknown>>(partialJson: string | undefined): T {
 	if (!partialJson || partialJson.trim() === "") {
 		return {} as T;
+	}
+	if (nativeStreamingJsonParser) {
+		const result = nativeStreamingJsonParser(partialJson);
+		if (result !== undefined) return result as T;
 	}
 
 	try {

@@ -30,6 +30,13 @@ uses ripgrep's own crates and settings and returns ripgrep's match messages, std
 with `setNativeGrep(grepFiles)` from `@earendil-works/pi-coding-agent`; it is not enabled by default. Unlike ripgrep,
 matching files are reported in path order, and ripgrep configuration files (`RIPGREP_CONFIG_PATH`) are not read.
 
+## Streaming JSON
+
+`parseStreamingJsonFast` is a Rust fast path for pi-ai's `parseStreamingJson` (`crates/pi-json`), which pi-ai calls
+with every growing prefix of streamed tool-call arguments. It handles complete JSON and well-formed prefixes of an
+object or array and returns `undefined` for anything else, so pi-ai runs its TypeScript implementation. Install it
+with `setNativeStreamingJsonParser(parseStreamingJsonFast)` from `@earendil-works/pi-ai`.
+
 ## Enable everything
 
 `PI_RUST=1 pi` switches every Rust implementation on at startup. From the SDK, call `enableRustFeatures()` from

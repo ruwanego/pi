@@ -16,7 +16,7 @@ use napi::bindgen_prelude::Uint8Array;
 use napi::{Env, Error, Status, sys};
 use napi::{JsValue, Unknown};
 use napi_derive::napi;
-use pi_protocol::cbor::{self, CborError, Limits, Value, Writer};
+use pi_protocol::cbor::{self, CborError, Limits, ValueRef, Writer};
 use pi_protocol::framing::{self, FrameError};
 
 const CBOR_ERROR_CODE: &str = "PI_CBOR_ERROR";
@@ -175,6 +175,61 @@ impl Js {
 		Ok(units)
 	}
 
+	/// Length in UTF-16 code units, without copying the string.
+	fn utf16_length(self, value: sys::napi_value) -> Outcome<usize> {
+		let mut length = 0;
+		check(self.env, unsafe {
+			sys::napi_get_value_string_utf16(self.env, value, ptr::null_mut(), 0, &mut length)
+		})?;
+		Ok(length)
+	}
+
+	/// Writes the string as UTF-8 into `out`, replacing lone surrogates with U+FFFD. `capacity` must be at least
+	/// the UTF-8 length (three bytes per UTF-16 code unit always suffices).
+	fn utf8_into(self, value: sys::napi_value, capacity: usize, out: &mut Vec<u8>) -> Outcome<()> {
+		out.clear();
+		out.reserve(capacity + 1);
+		let mut written = 0;
+		check(self.env, unsafe {
+			sys::napi_get_value_string_utf8(
+				self.env,
+				value,
+				out.as_mut_ptr() as *mut c_char,
+				capacity + 1,
+				&mut written,
+			)
+		})?;
+		// SAFETY: Node-API initialized `written` bytes (plus a NUL terminator) within the reserved capacity.
+		unsafe { out.set_len(written) };
+		Ok(())
+	}
+
+	/// Creates a string from UTF-8. ASCII uses the Latin-1 constructor (a plain copy); long non-ASCII text is
+	/// transcoded to UTF-16 here, which is faster than V8's UTF-8 constructor.
+	fn text(self, value: &str) -> Outcome<sys::napi_value> {
+		if !value.is_ascii() {
+			if value.len() < LONG_TEXT_LENGTH {
+				return self.string(value);
+			}
+			let units: Vec<u16> = value.encode_utf16().collect();
+			let mut result = ptr::null_mut();
+			check(self.env, unsafe {
+				sys::napi_create_string_utf16(self.env, units.as_ptr(), units.len() as isize, &mut result)
+			})?;
+			return Ok(result);
+		}
+		let mut result = ptr::null_mut();
+		check(self.env, unsafe {
+			sys::napi_create_string_latin1(
+				self.env,
+				value.as_ptr() as *const c_char,
+				value.len() as isize,
+				&mut result,
+			)
+		})?;
+		Ok(result)
+	}
+
 	fn string(self, value: &str) -> Outcome<sys::napi_value> {
 		let mut result = ptr::null_mut();
 		check(self.env, unsafe {
@@ -302,6 +357,8 @@ struct Encoder {
 	limits: Limits,
 	writer: Writer,
 	ancestors: Vec<sys::napi_value>,
+	/// Reused UTF-8 output buffer for strings.
+	scratch: Vec<u8>,
 }
 
 fn type_name(kind: sys::napi_valuetype) -> &'static str {
@@ -339,9 +396,20 @@ impl Encoder {
 		self.js.to_number(self.js.named(array, "length")?)
 	}
 
+	/// V8 writes UTF-8 directly, replacing lone surrogates with U+FFFD. Output without a 0xEF byte cannot
+	/// contain U+FFFD, so it is exact; otherwise the UTF-16 path decides between a real U+FFFD and a lone
+	/// surrogate, with the TypeScript encoder's error order.
 	fn encode_string(&mut self, value: sys::napi_value) -> Outcome<()> {
-		let units = self.js.utf16(value)?;
-		cbor::encode_text_utf16(&mut self.writer, &units, &self.limits)?;
+		let units = self.js.utf16_length(value)?;
+		self.js.utf8_into(value, units * 3, &mut self.scratch)?;
+		if self.scratch.contains(&0xef) {
+			let units = self.js.utf16(value)?;
+			cbor::encode_text_utf16(&mut self.writer, &units, &self.limits)?;
+			return Ok(());
+		}
+		// SAFETY: V8 writes well-formed UTF-8; without U+FFFD there were no lone surrogates.
+		let text = unsafe { std::str::from_utf8_unchecked(&self.scratch) };
+		cbor::encode_text(&mut self.writer, text, &self.limits)?;
 		Ok(())
 	}
 
@@ -462,9 +530,61 @@ impl Encoder {
 	}
 }
 
+/// Byte strings of at least this length are copied with `napi_create_buffer_copy`, which skips the zero-fill
+/// of `napi_create_arraybuffer`.
+const LARGE_BYTES_LENGTH: usize = 64 * 1024;
+
+/// Creates a plain `Uint8Array` with its own `ArrayBuffer` of exactly `bytes.len()` bytes, like
+/// `new Uint8Array(view)` in the TypeScript decoder.
 fn create_uint8_array(js: Js, bytes: &[u8]) -> Outcome<sys::napi_value> {
 	let mut data = ptr::null_mut();
 	let mut buffer = ptr::null_mut();
+	if bytes.len() >= LARGE_BYTES_LENGTH {
+		// A Node.js Buffer copy gets a dedicated, uninitialized ArrayBuffer (pooling only happens in JavaScript);
+		// re-wrap that ArrayBuffer as a plain Uint8Array.
+		let mut node_buffer = ptr::null_mut();
+		check(js.env, unsafe {
+			sys::napi_create_buffer_copy(
+				js.env,
+				bytes.len(),
+				bytes.as_ptr() as *const _,
+				&mut data,
+				&mut node_buffer,
+			)
+		})?;
+		let mut kind = 0;
+		let mut length = 0;
+		let mut offset = 0;
+		check(js.env, unsafe {
+			sys::napi_get_typedarray_info(
+				js.env,
+				node_buffer,
+				&mut kind,
+				&mut length,
+				&mut data,
+				&mut buffer,
+				&mut offset,
+			)
+		})?;
+		let mut buffer_length = 0;
+		check(js.env, unsafe {
+			sys::napi_get_arraybuffer_info(js.env, buffer, ptr::null_mut(), &mut buffer_length)
+		})?;
+		if offset == 0 && buffer_length == bytes.len() {
+			let mut array = ptr::null_mut();
+			check(js.env, unsafe {
+				sys::napi_create_typedarray(
+					js.env,
+					sys::TypedarrayType::uint8_array,
+					bytes.len(),
+					buffer,
+					0,
+					&mut array,
+				)
+			})?;
+			return Ok(array);
+		}
+	}
 	check(js.env, unsafe {
 		sys::napi_create_arraybuffer(js.env, bytes.len(), &mut data, &mut buffer)
 	})?;
@@ -486,45 +606,218 @@ fn create_uint8_array(js: Js, bytes: &[u8]) -> Outcome<sys::napi_value> {
 	Ok(array)
 }
 
-fn to_js(js: Js, value: &Value) -> Outcome<sys::napi_value> {
-	let env = js.env;
-	let mut result = ptr::null_mut();
-	match value {
-		Value::Null => check(env, unsafe { sys::napi_get_null(env, &mut result) })?,
-		Value::Bool(value) => check(env, unsafe { sys::napi_get_boolean(env, *value, &mut result) })?,
-		Value::Number(value) => check(env, unsafe { sys::napi_create_double(env, *value, &mut result) })?,
-		Value::Text(value) => result = js.string(value)?,
-		Value::Bytes(value) => result = create_uint8_array(js, value)?,
-		Value::Array(items) => {
-			check(env, unsafe { sys::napi_create_array(env, &mut result) })?;
-			for (index, item) in items.iter().enumerate() {
-				let _scope = js.open_scope()?;
-				let item = to_js(js, item)?;
-				check(env, unsafe { sys::napi_set_element(env, result, index as u32, item) })?;
+/// Non-ASCII strings of at least this many bytes are transcoded to UTF-16 before being handed to V8.
+const LONG_TEXT_LENGTH: usize = 1024;
+
+/// Strings longer than this are created directly instead of through the JSON skeleton.
+const INLINE_TEXT_LIMIT: usize = 256;
+
+enum Step<'a> {
+	Key(&'a str),
+	Index(u32),
+}
+
+/// A value left out of the JSON skeleton (as `null`) and assigned after parsing.
+struct Patch<'a> {
+	path: Vec<Step<'a>>,
+	value: &'a ValueRef<'a>,
+}
+
+/// Decoded values are turned into JavaScript by writing them as JSON and calling V8's `JSON.parse`, which
+/// creates objects far faster than one Node-API call per property. `JSON.parse` defines own data properties
+/// (so `"__proto__"` stays an ordinary key) and orders keys like `Object.defineProperty`, matching the
+/// TypeScript decoder. Byte strings and long strings are patched in afterwards.
+struct Skeleton<'a> {
+	json: Vec<u8>,
+	path: Vec<Step<'a>>,
+	patches: Vec<Patch<'a>>,
+}
+
+impl<'a> Skeleton<'a> {
+	fn write(&mut self, value: &'a ValueRef<'a>) {
+		match value {
+			ValueRef::Null => self.json.extend_from_slice(b"null"),
+			ValueRef::Bool(true) => self.json.extend_from_slice(b"true"),
+			ValueRef::Bool(false) => self.json.extend_from_slice(b"false"),
+			ValueRef::Number(number) => write_number(&mut self.json, *number),
+			ValueRef::Text(text) if text.len() <= INLINE_TEXT_LIMIT => write_json_string(&mut self.json, text),
+			ValueRef::Text(_) | ValueRef::Bytes(_) => {
+				self.json.extend_from_slice(b"null");
+				let path = self
+					.path
+					.iter()
+					.map(|step| match step {
+						Step::Key(key) => Step::Key(key),
+						Step::Index(index) => Step::Index(*index),
+					})
+					.collect();
+				self.patches.push(Patch { path, value });
 			}
-		}
-		Value::Map(entries) => {
-			check(env, unsafe { sys::napi_create_object(env, &mut result) })?;
-			for (key, entry) in entries {
-				let _scope = js.open_scope()?;
-				// defineProperty semantics, so keys such as "__proto__" stay ordinary data properties.
-				let descriptor = sys::napi_property_descriptor {
-					utf8name: ptr::null(),
-					name: js.string(key)?,
-					method: None,
-					getter: None,
-					setter: None,
-					value: to_js(js, entry)?,
-					attributes: sys::PropertyAttributes::writable
-						| sys::PropertyAttributes::enumerable
-						| sys::PropertyAttributes::configurable,
-					data: ptr::null_mut(),
-				};
-				check(env, unsafe { sys::napi_define_properties(env, result, 1, &descriptor) })?;
+			ValueRef::Array(items) => {
+				self.json.push(b'[');
+				for (index, item) in items.iter().enumerate() {
+					if index > 0 {
+						self.json.push(b',');
+					}
+					self.path.push(Step::Index(index as u32));
+					self.write(item);
+					self.path.pop();
+				}
+				self.json.push(b']');
+			}
+			ValueRef::Map(entries) => {
+				self.json.push(b'{');
+				for (index, (key, entry)) in entries.iter().enumerate() {
+					if index > 0 {
+						self.json.push(b',');
+					}
+					write_json_string(&mut self.json, key);
+					self.json.push(b':');
+					self.path.push(Step::Key(key));
+					self.write(entry);
+					self.path.pop();
+				}
+				self.json.push(b'}');
 			}
 		}
 	}
+}
+
+/// Writes a finite number so that `JSON.parse` returns the identical double, including `-0`.
+fn write_number(json: &mut Vec<u8>, number: f64) {
+	use std::io::Write;
+	if number.fract() == 0.0 && number.abs() < 9_007_199_254_740_992.0 && !(number == 0.0 && number.is_sign_negative())
+	{
+		let _ = write!(json, "{}", number as i64);
+	} else {
+		// `Display` prints the shortest digits that round-trip, without an exponent.
+		let _ = write!(json, "{number}");
+	}
+}
+
+fn write_json_string(json: &mut Vec<u8>, text: &str) {
+	const HEX: &[u8; 16] = b"0123456789abcdef";
+	json.push(b'"');
+	let bytes = text.as_bytes();
+	let mut start = 0;
+	for (index, &byte) in bytes.iter().enumerate() {
+		let escape: &[u8] = match byte {
+			b'"' => b"\\\"",
+			b'\\' => b"\\\\",
+			0x00..=0x1f => b"",
+			_ => continue,
+		};
+		json.extend_from_slice(&bytes[start..index]);
+		if escape.is_empty() {
+			json.extend_from_slice(&[
+				b'\\',
+				b'u',
+				b'0',
+				b'0',
+				HEX[(byte >> 4) as usize],
+				HEX[(byte & 0xf) as usize],
+			]);
+		} else {
+			json.extend_from_slice(escape);
+		}
+		start = index + 1;
+	}
+	json.extend_from_slice(&bytes[start..]);
+	json.push(b'"');
+}
+
+/// Creates a value that the skeleton does not express: a byte string or a string.
+fn leaf_to_js(js: Js, value: &ValueRef<'_>) -> Outcome<sys::napi_value> {
+	let env = js.env;
+	let mut result = ptr::null_mut();
+	match value {
+		ValueRef::Text(text) => result = js.text(text)?,
+		ValueRef::Bytes(bytes) => result = create_uint8_array(js, bytes)?,
+		ValueRef::Null => check(env, unsafe { sys::napi_get_null(env, &mut result) })?,
+		ValueRef::Bool(value) => check(env, unsafe { sys::napi_get_boolean(env, *value, &mut result) })?,
+		ValueRef::Number(value) => check(env, unsafe { sys::napi_create_double(env, *value, &mut result) })?,
+		ValueRef::Array(_) | ValueRef::Map(_) => unreachable!("containers are built by JSON.parse"),
+	}
 	Ok(result)
+}
+
+fn define_data_property(js: Js, object: sys::napi_value, key: &str, value: sys::napi_value) -> Outcome<()> {
+	let descriptor = sys::napi_property_descriptor {
+		utf8name: ptr::null(),
+		name: js.text(key)?,
+		method: None,
+		getter: None,
+		setter: None,
+		value,
+		attributes: sys::PropertyAttributes::writable
+			| sys::PropertyAttributes::enumerable
+			| sys::PropertyAttributes::configurable,
+		data: ptr::null_mut(),
+	};
+	check(js.env, unsafe {
+		sys::napi_define_properties(js.env, object, 1, &descriptor)
+	})
+}
+
+fn to_js(js: Js, value: &ValueRef<'_>) -> Outcome<sys::napi_value> {
+	if !matches!(value, ValueRef::Array(_) | ValueRef::Map(_)) {
+		return leaf_to_js(js, value);
+	}
+	let mut skeleton = Skeleton {
+		json: Vec::new(),
+		path: Vec::new(),
+		patches: Vec::new(),
+	};
+	skeleton.write(value);
+	// SAFETY: the skeleton is built from `&str` pieces and ASCII syntax, so it is valid UTF-8.
+	let json = unsafe { std::str::from_utf8_unchecked(&skeleton.json) };
+	let text = js.text(json)?;
+	let mut undefined = ptr::null_mut();
+	check(js.env, unsafe { sys::napi_get_undefined(js.env, &mut undefined) })?;
+	let root = js.call(json_parse(js)?, undefined, &[text])?;
+	for patch in &skeleton.patches {
+		let _scope = js.open_scope()?;
+		let (last, parents) = patch.path.split_last().expect("patched values are inside a container");
+		let mut parent = root;
+		for step in parents {
+			parent = match step {
+				Step::Key(key) => js.get(parent, js.text(key)?)?,
+				Step::Index(index) => js.element(parent, *index)?,
+			};
+		}
+		let leaf = leaf_to_js(js, patch.value)?;
+		match last {
+			Step::Key(key) => define_data_property(js, parent, key, leaf)?,
+			Step::Index(index) => check(js.env, unsafe { sys::napi_set_element(js.env, parent, *index, leaf) })?,
+		}
+	}
+	Ok(root)
+}
+
+thread_local! {
+	/// `JSON.parse` as it was when first needed, so later reassignments of the global do not affect decoding.
+	static JSON_PARSE: std::cell::Cell<Option<(sys::napi_env, sys::napi_ref)>> = const { std::cell::Cell::new(None) };
+}
+
+fn json_parse(js: Js) -> Outcome<sys::napi_value> {
+	if let Some((env, reference)) = JSON_PARSE.get()
+		&& env == js.env
+	{
+		let mut value = ptr::null_mut();
+		check(js.env, unsafe {
+			sys::napi_get_reference_value(js.env, reference, &mut value)
+		})?;
+		return Ok(value);
+	}
+	let mut global = ptr::null_mut();
+	check(js.env, unsafe { sys::napi_get_global(js.env, &mut global) })?;
+	let parse = js.named(js.named(global, "JSON")?, "parse")?;
+	let mut reference = ptr::null_mut();
+	check(js.env, unsafe {
+		sys::napi_create_reference(js.env, parse, 1, &mut reference)
+	})?;
+	JSON_PARSE.set(Some((js.env, reference)));
+	Ok(parse)
 }
 
 fn limits(max_byte_length: u32, max_container_length: u32, max_depth: u32) -> Limits {
@@ -553,6 +846,7 @@ pub fn cbor_encode(
 			limits,
 			writer: Writer::new(limits.max_byte_length),
 			ancestors: Vec::new(),
+			scratch: Vec::new(),
 		};
 		encoder.encode_value(value.value().value, 0)?;
 		create_uint8_array(js, &encoder.writer.finish())
@@ -571,7 +865,7 @@ pub fn cbor_decode(
 ) -> napi::Result<sys::napi_value> {
 	let js = Js { env: env.raw() };
 	let run = || -> Outcome<sys::napi_value> {
-		let value = cbor::decode(&bytes, &limits(max_byte_length, max_container_length, max_depth))?;
+		let value = cbor::decode_ref(&bytes, &limits(max_byte_length, max_container_length, max_depth))?;
 		to_js(js, &value)
 	};
 	run().map_err(|failure| throw(js.env, failure))
@@ -604,8 +898,20 @@ impl NativeFrameDecoder {
 	pub fn push(&mut self, env: Env, chunk: Uint8Array) -> napi::Result<Vec<sys::napi_value>> {
 		let js = Js { env: env.raw() };
 		let mut run = || -> Outcome<Vec<sys::napi_value>> {
-			let frames = self.inner.push(&chunk)?;
-			frames.iter().map(|frame| create_uint8_array(js, frame)).collect()
+			let mut frames = Vec::new();
+			let mut failure = None;
+			self.inner.push_with(&chunk, |frame| {
+				if failure.is_none() {
+					match create_uint8_array(js, frame) {
+						Ok(array) => frames.push(array),
+						Err(error) => failure = Some(error),
+					}
+				}
+			})?;
+			match failure {
+				Some(error) => Err(error),
+				None => Ok(frames),
+			}
 		};
 		run().map_err(|failure| throw(js.env, failure))
 	}

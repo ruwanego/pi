@@ -30,16 +30,19 @@
 			"summary": "Rust CBOR subset + framing behind setNativeCodec(protocolCodec). The TypeScript codec stays the default; the protocol test suite runs against both, plus a differential fuzz suite.",
 			"parity": "packages/protocol/test/native-parity.test.ts",
 			"benchmark": {
-				"note": "Rust/TS time ratio, linux-x64, Node 22.20; lower is faster",
-				"encodeSmallEnvelope": 0.6,
-				"decodeSmallEnvelope": 0.91,
-				"encode5kObjects": 0.78,
-				"decode5kObjects": 1.02,
-				"encode1MBText": 1.19,
-				"decode1MBText": 1.04,
-				"encode1MBBytes": 0.54,
-				"decode1MBBytes": 1.69,
-				"frames1000Messages": 1.13
+				"note": "Rust/TS time ratio, linux-x64, Node 22.20; lower is faster. Decoding writes the structure as JSON for V8's JSON.parse and patches in byte strings and long strings; text encoding uses V8's UTF-8 writer. Copy-bound cases (decoding 1MB of ASCII text or bytes) are at parity because both sides must copy the data.",
+				"encodeSmallEnvelope": 0.5,
+				"decodeSmallEnvelope": 0.58,
+				"encode5kObjects": 0.56,
+				"decode5kObjects": 0.46,
+				"encode1MBAsciiText": 0.34,
+				"decode1MBAsciiText": 0.95,
+				"encode1MBUnicodeText": 0.18,
+				"decode1MBUnicodeText": 0.57,
+				"encode1MBBytes": 0.56,
+				"decode1MBBytes": 1.0,
+				"frames1000Messages64KBChunks": 0.94,
+				"frames1000MessagesOneChunk": 0.67
 			}
 		},
 		{

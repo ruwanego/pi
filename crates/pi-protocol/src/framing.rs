@@ -74,8 +74,16 @@ impl FrameDecoder {
 	}
 
 	pub fn push(&mut self, chunk: &[u8]) -> Result<Vec<Vec<u8>>, FrameError> {
-		self.check_open()?;
 		let mut frames = Vec::new();
+		self.push_with(chunk, |frame| frames.push(frame.to_vec()))?;
+		Ok(frames)
+	}
+
+	/// Like [`FrameDecoder::push`], but passes each completed payload to `emit` as it is found. Payloads that lie
+	/// entirely within `chunk` are borrowed from it instead of being copied. On error, payloads already emitted
+	/// for this chunk must be discarded, as `push` does.
+	pub fn push_with(&mut self, chunk: &[u8], mut emit: impl FnMut(&[u8])) -> Result<(), FrameError> {
+		self.check_open()?;
 		let mut offset = 0;
 		while offset < chunk.len() {
 			let expected = match self.expected_payload_length {
@@ -98,7 +106,12 @@ impl FrameDecoder {
 						)));
 					}
 					if frame_length == 0 {
-						frames.push(Vec::new());
+						emit(&[]);
+						continue;
+					}
+					if frame_length <= chunk.len() - offset {
+						emit(&chunk[offset..offset + frame_length]);
+						offset += frame_length;
 						continue;
 					}
 					self.expected_payload_length = Some(frame_length);
@@ -111,11 +124,11 @@ impl FrameDecoder {
 			self.payload.extend_from_slice(&chunk[offset..offset + payload_bytes]);
 			offset += payload_bytes;
 			if self.payload.len() == expected {
-				frames.push(std::mem::take(&mut self.payload));
+				emit(&std::mem::take(&mut self.payload));
 				self.expected_payload_length = None;
 			}
 		}
-		Ok(frames)
+		Ok(())
 	}
 
 	pub fn end(&mut self) -> Result<(), FrameError> {

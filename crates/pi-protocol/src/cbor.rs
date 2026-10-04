@@ -76,6 +76,40 @@ pub enum Value {
 	Map(Vec<(String, Value)>),
 }
 
+/// A decoded value that borrows its strings and byte strings from the input.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValueRef<'a> {
+	Null,
+	Bool(bool),
+	Number(f64),
+	Bytes(&'a [u8]),
+	Text(&'a str),
+	Array(Vec<ValueRef<'a>>),
+	Map(Vec<(&'a str, ValueRef<'a>)>),
+}
+
+impl ValueRef<'_> {
+	pub fn to_value(&self) -> Value {
+		match self {
+			ValueRef::Null => Value::Null,
+			ValueRef::Bool(value) => Value::Bool(*value),
+			ValueRef::Number(value) => Value::Number(*value),
+			ValueRef::Bytes(value) => Value::Bytes(value.to_vec()),
+			ValueRef::Text(value) => Value::Text((*value).to_owned()),
+			ValueRef::Array(items) => Value::Array(items.iter().map(ValueRef::to_value).collect()),
+			ValueRef::Map(entries) => Value::Map(
+				entries
+					.iter()
+					.map(|(key, entry)| ((*key).to_owned(), entry.to_value()))
+					.collect(),
+			),
+		}
+	}
+}
+
+/// Maps up to this many entries check for duplicate keys by scanning instead of hashing.
+const LINEAR_KEY_CHECK_LIMIT: usize = 16;
+
 /// Bounded output buffer. Every write fails once the configured byte limit would be exceeded.
 pub struct Writer {
 	buffer: Vec<u8>,
@@ -298,31 +332,31 @@ struct Reader<'a> {
 	limits: Limits,
 }
 
-impl Reader<'_> {
-	fn read_item(&mut self, depth: usize) -> Result<Value, CborError> {
+impl<'a> Reader<'a> {
+	fn read_item(&mut self, depth: usize) -> Result<ValueRef<'a>, CborError> {
 		check_depth(depth, &self.limits)?;
 		let initial = self.read_byte()?;
 		let major_type = initial >> 5;
 		let additional_information = initial & 0x1f;
 
 		match major_type {
-			0 => Ok(Value::Number(self.read_argument(additional_information)? as f64)),
+			0 => Ok(ValueRef::Number(self.read_argument(additional_information)? as f64)),
 			1 => {
 				let value = -1.0 - self.read_argument(additional_information)? as f64;
 				if value < -MAX_SAFE_INTEGER {
 					return error("Decoded CBOR integer is outside the safe range");
 				}
-				Ok(Value::Number(value))
+				Ok(ValueRef::Number(value))
 			}
 			2 => {
 				let length = self.read_length(additional_information, "byte string", self.limits.max_byte_length)?;
-				Ok(Value::Bytes(self.read_bytes(length)?.to_vec()))
+				Ok(ValueRef::Bytes(self.read_bytes(length)?))
 			}
 			3 => {
 				let length = self.read_length(additional_information, "text string", self.limits.max_byte_length)?;
 				let bytes = self.read_bytes(length)?;
 				match std::str::from_utf8(bytes) {
-					Ok(text) => Ok(Value::Text(text.to_owned())),
+					Ok(text) => Ok(ValueRef::Text(text)),
 					Err(_) => error("CBOR text string contains invalid UTF-8"),
 				}
 			}
@@ -332,34 +366,42 @@ impl Reader<'_> {
 				for _ in 0..length {
 					result.push(self.read_item(depth + 1)?);
 				}
-				Ok(Value::Array(result))
+				Ok(ValueRef::Array(result))
 			}
 			5 => {
 				let length = self.read_length(additional_information, "map", self.limits.max_container_length)?;
-				let mut result = Vec::new();
+				let mut result: Vec<(&'a str, ValueRef<'a>)> = Vec::new();
 				let mut keys = HashSet::new();
 				for _ in 0..length {
-					let Value::Text(key) = self.read_item(depth + 1)? else {
+					let ValueRef::Text(key) = self.read_item(depth + 1)? else {
 						return error("CBOR map keys must be strings");
 					};
-					if !keys.insert(key.clone()) {
+					let duplicate = if result.len() < LINEAR_KEY_CHECK_LIMIT {
+						result.iter().any(|(existing, _)| *existing == key)
+					} else {
+						if keys.is_empty() {
+							keys.extend(result.iter().map(|(existing, _)| *existing));
+						}
+						!keys.insert(key)
+					};
+					if duplicate {
 						return error("CBOR map contains a duplicate key");
 					}
 					let value = self.read_item(depth + 1)?;
 					result.push((key, value));
 				}
-				Ok(Value::Map(result))
+				Ok(ValueRef::Map(result))
 			}
 			6 => error("CBOR tags are not supported"),
 			_ => self.read_simple(additional_information),
 		}
 	}
 
-	fn read_simple(&mut self, additional_information: u8) -> Result<Value, CborError> {
+	fn read_simple(&mut self, additional_information: u8) -> Result<ValueRef<'a>, CborError> {
 		match additional_information {
-			20 => Ok(Value::Bool(false)),
-			21 => Ok(Value::Bool(true)),
-			22 => Ok(Value::Null),
+			20 => Ok(ValueRef::Bool(false)),
+			21 => Ok(ValueRef::Bool(true)),
+			22 => Ok(ValueRef::Null),
 			27 => {
 				let bytes: [u8; 8] = self.read_bytes(8)?.try_into().expect("eight bytes");
 				let value = f64::from_be_bytes(bytes);
@@ -369,7 +411,7 @@ impl Reader<'_> {
 				if value.fract() == 0.0 && value.abs() > MAX_SAFE_INTEGER {
 					return error("Decoded CBOR integer is outside the safe range");
 				}
-				Ok(Value::Number(value))
+				Ok(ValueRef::Number(value))
 			}
 			31 => error("CBOR break marker is not supported"),
 			_ => error("Unsupported CBOR simple value or floating-point width"),
@@ -414,7 +456,7 @@ impl Reader<'_> {
 		Ok(value)
 	}
 
-	fn read_bytes(&mut self, length: usize) -> Result<&[u8], CborError> {
+	fn read_bytes(&mut self, length: usize) -> Result<&'a [u8], CborError> {
 		if length > self.bytes.len() - self.offset {
 			return error("Truncated CBOR payload");
 		}
@@ -426,6 +468,11 @@ impl Reader<'_> {
 
 /// Decodes exactly one item.
 pub fn decode(bytes: &[u8], limits: &Limits) -> Result<Value, CborError> {
+	decode_ref(bytes, limits).map(|value| value.to_value())
+}
+
+/// Decodes exactly one item without copying strings or byte strings out of `bytes`.
+pub fn decode_ref<'a>(bytes: &'a [u8], limits: &Limits) -> Result<ValueRef<'a>, CborError> {
 	if bytes.len() > limits.max_byte_length {
 		return error(format!(
 			"CBOR byte length exceeds configured limit of {}",

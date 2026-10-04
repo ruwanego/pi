@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { describe, it } from "node:test";
-import native, { findFiles, loadNative, protocolCodec, rustVersion } from "../src/index.ts";
+import native, { findFiles, grepFiles, loadNative, protocolCodec, rustVersion } from "../src/index.ts";
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
 	version: string;
@@ -71,5 +71,37 @@ describe("findFiles", () => {
 			message: "[fd error]: error parsing glob '[': unclosed character class; missing ']'",
 		});
 		await assert.rejects(findFiles(request(tmpdir(), "*", 2.5)), /invalid value '2.5' for '--max-results <count>'/);
+	});
+});
+
+describe("grepFiles", () => {
+	const request = (searchPath: string, pattern: string) => ({
+		pattern,
+		searchPath,
+		ignoreCase: false,
+		fixedStrings: false,
+		maxMatches: 100,
+	});
+
+	it("returns ripgrep's match messages", async () => {
+		const root = mkdtempSync(join(tmpdir(), "pi-native-grep-"));
+		try {
+			writeFileSync(join(root, "a.txt"), "one\nneedle\n");
+			const result = await grepFiles(request(root, "needle"));
+			assert.deepStrictEqual(result, {
+				matches: [{ path: join(root, "a.txt"), lineNumber: 2, line: "needle\n" }],
+				limitReached: false,
+				stderr: "",
+				errored: false,
+			});
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects with ripgrep's error text", async () => {
+		await assert.rejects(grepFiles(request(tmpdir(), "(")), {
+			message: "rg: regex parse error:\n    (?:()\n    ^\nerror: unclosed group",
+		});
 	});
 });

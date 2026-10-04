@@ -1,6 +1,7 @@
 //! Native bridge for pi. Exports are loaded by `@ruwanego/pi-native`.
 
 mod find;
+mod grep;
 mod protocol;
 
 use napi_derive::napi;

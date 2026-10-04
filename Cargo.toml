@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/pi-find", "crates/pi-native", "crates/pi-protocol"]
+members = ["crates/pi-find", "crates/pi-grep", "crates/pi-native", "crates/pi-protocol"]
 
 [workspace.package]
 version = "0.99.2"
@@ -14,6 +14,7 @@ napi = { version = "=3.14.0", default-features = false, features = ["napi8"] }
 napi-derive = "=3.6.10"
 napi-build = "=2.6.0"
 pi-find = { path = "crates/pi-find" }
+pi-grep = { path = "crates/pi-grep" }
 pi-protocol = { path = "crates/pi-protocol" }
 
 [profile.release]

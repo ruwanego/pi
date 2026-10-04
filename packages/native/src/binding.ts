@@ -15,6 +15,27 @@ export interface NativeFindSearchHandle {
 	cancel(): void;
 }
 
+export interface NativeGrepOptions {
+	pattern: string;
+	searchPath: string;
+	glob?: string;
+	ignoreCase: boolean;
+	fixedStrings: boolean;
+	maxMatches: number;
+}
+
+export interface NativeGrepResult {
+	matches: Array<{ path?: string; lineNumber: number; line?: string }>;
+	limitReached: boolean;
+	stderr: string;
+	errored: boolean;
+}
+
+export interface NativeGrepSearchHandle {
+	run(): Promise<NativeGrepResult>;
+	cancel(): void;
+}
+
 export interface NativeFrameDecoderHandle {
 	push(chunk: Uint8Array): Uint8Array[];
 	end(): void;
@@ -28,6 +49,7 @@ export interface NativeBinding {
 	frameEncode(payload: Uint8Array): Uint8Array;
 	NativeFrameDecoder: new (maxFrameLength: number) => NativeFrameDecoderHandle;
 	NativeFindSearch: new (options: NativeFindOptions) => NativeFindSearchHandle;
+	NativeGrepSearch: new (options: NativeGrepOptions) => NativeGrepSearchHandle;
 }
 
 const cjsRequire = createRequire(import.meta.url);

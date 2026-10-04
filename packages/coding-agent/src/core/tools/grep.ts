@@ -62,6 +62,47 @@ const defaultGrepOperations: GrepOperations = {
 	readFile: (p) => fsReadFile(p, "utf-8"),
 };
 
+/** Arguments of one ripgrep invocation, as the grep tool would pass them on the command line. */
+export interface NativeGrepRequest {
+	pattern: string;
+	/** Absolute file or directory to search. */
+	searchPath: string;
+	/** `--glob`. */
+	glob?: string;
+	/** `--ignore-case`. */
+	ignoreCase: boolean;
+	/** `--fixed-strings`. */
+	fixedStrings: boolean;
+	/** The tool stops ripgrep after this many matches. */
+	maxMatches: number;
+}
+
+/** ripgrep's output for one search: its `match` messages, stderr text, and whether it would exit with status 2. */
+export interface NativeGrepResult {
+	/** `path.text`, `line_number` and `lines.text`; `path` and `line` are absent when ripgrep reports bytes. */
+	matches: Array<{ path?: string; lineNumber: number; line?: string }>;
+	/** Whether the search stopped at `maxMatches`. */
+	limitReached: boolean;
+	stderr: string;
+	errored: boolean;
+}
+
+/**
+ * Alternative to spawning ripgrep, e.g. `grepFiles` from `@ruwanego/pi-native`. Failures that make ripgrep exit
+ * before searching must reject with the text ripgrep would print to stderr.
+ */
+export type NativeGrep = (request: NativeGrepRequest, signal?: AbortSignal) => Promise<NativeGrepResult>;
+
+let nativeGrep: NativeGrep | undefined;
+
+/**
+ * Experimental: runs the default grep search through `grep` instead of the ripgrep binary, or back through ripgrep
+ * when `undefined`. Custom `GrepOperations` still provide file access.
+ */
+export function setNativeGrep(grep: NativeGrep | undefined): void {
+	nativeGrep = grep;
+}
+
 export interface GrepToolOptions {
 	/** Custom operations for grep. Default: local filesystem plus ripgrep */
 	operations?: GrepOperations;
@@ -116,8 +157,10 @@ export function createGrepToolDefinition(
 
 				(async () => {
 					try {
-						const rgPath = await ensureTool("rg");
-						if (!rgPath) {
+						// Default implementation uses ripgrep, or the native replacement when one is installed.
+						const activeNativeGrep = nativeGrep;
+						const rgPath = activeNativeGrep ? undefined : await ensureTool("rg");
+						if (!activeNativeGrep && !rgPath) {
 							settle(() => reject(new Error("ripgrep (rg) is not available and could not be downloaded")));
 							return;
 						}
@@ -159,40 +202,19 @@ export function createGrepToolDefinition(
 							return lines;
 						};
 
-						const args: string[] = ["--json", "--line-number", "--color=never", "--hidden"];
-						if (ignoreCase) args.push("--ignore-case");
-						if (literal) args.push("--fixed-strings");
-						if (glob) args.push("--glob", glob);
-						args.push("--", pattern, searchPath);
-
-						const child = spawn(rgPath, args, { stdio: ["ignore", "pipe", "pipe"] });
-						const rl = createInterface({ input: child.stdout });
-						let stderr = "";
 						let matchCount = 0;
 						let matchLimitReached = false;
 						let linesTruncated = false;
-						let aborted = false;
-						let killedDueToLimit = false;
 						const outputLines: string[] = [];
-
-						const cleanup = () => {
-							rl.close();
-							signal?.removeEventListener("abort", onAbort);
+						const matches: Array<{ filePath: string; lineNumber: number; lineText?: string }> = [];
+						// Records one ripgrep match message. Returns true once the match limit is reached.
+						const recordMatch = (filePath: unknown, lineNumber: unknown, lineText: string | undefined) => {
+							matchCount++;
+							if (typeof filePath === "string" && filePath && typeof lineNumber === "number")
+								matches.push({ filePath, lineNumber, lineText });
+							if (matchCount >= effectiveLimit) matchLimitReached = true;
+							return matchLimitReached;
 						};
-						const stopChild = (dueToLimit = false) => {
-							if (!child.killed) {
-								killedDueToLimit = dueToLimit;
-								child.kill();
-							}
-						};
-						const onAbort = () => {
-							aborted = true;
-							stopChild();
-						};
-						signal?.addEventListener("abort", onAbort, { once: true });
-						child.stderr?.on("data", (chunk) => {
-							stderr += chunk.toString();
-						});
 
 						const formatBlock = async (filePath: string, lineNumber: number): Promise<string[]> => {
 							const relativePath = formatPath(filePath);
@@ -214,40 +236,8 @@ export function createGrepToolDefinition(
 							return block;
 						};
 
-						// Collect matches during streaming, then format them after rg exits.
-						const matches: Array<{ filePath: string; lineNumber: number; lineText?: string }> = [];
-						rl.on("line", (line) => {
-							if (!line.trim() || matchCount >= effectiveLimit) return;
-							let event: any;
-							try {
-								event = JSON.parse(line);
-							} catch {
-								return;
-							}
-							if (event.type === "match") {
-								matchCount++;
-								const filePath = event.data?.path?.text;
-								const lineNumber = event.data?.line_number;
-								const lineText = event.data?.lines?.text;
-								if (filePath && typeof lineNumber === "number")
-									matches.push({ filePath, lineNumber, lineText });
-								if (matchCount >= effectiveLimit) {
-									matchLimitReached = true;
-									stopChild(true);
-								}
-							}
-						});
-
-						child.on("error", (error) => {
-							cleanup();
-							settle(() => reject(new Error(`Failed to run ripgrep: ${error.message}`)));
-						});
-						child.on("close", async (code) => {
-							cleanup();
-							if (aborted) {
-								settle(() => reject(new Error("Operation aborted")));
-								return;
-							}
+						// Builds the tool result once ripgrep has exited (or was stopped at the match limit).
+						const finish = async (code: number | null, stderr: string, killedDueToLimit: boolean) => {
 							if (!killedDueToLimit && code !== 0 && code !== 1) {
 								const errorMsg = stderr.trim() || `ripgrep exited with code ${code}`;
 								settle(() => reject(new Error(errorMsg)));
@@ -260,7 +250,7 @@ export function createGrepToolDefinition(
 								return;
 							}
 
-							// Format matches after streaming finishes so custom readFile() backends can be async.
+							// Format matches after the search finishes so custom readFile() backends can be async.
 							for (const match of matches) {
 								if (contextValue === 0 && match.lineText !== undefined) {
 									const relativePath = formatPath(match.filePath);
@@ -307,6 +297,90 @@ export function createGrepToolDefinition(
 									details: Object.keys(details).length > 0 ? details : undefined,
 								}),
 							);
+						};
+
+						if (activeNativeGrep) {
+							const result = await activeNativeGrep(
+								{
+									pattern,
+									searchPath,
+									glob: glob || undefined,
+									ignoreCase: Boolean(ignoreCase),
+									fixedStrings: Boolean(literal),
+									maxMatches: effectiveLimit,
+								},
+								signal,
+							);
+							if (signal?.aborted) {
+								settle(() => reject(new Error("Operation aborted")));
+								return;
+							}
+							for (const match of result.matches) {
+								if (recordMatch(match.path, match.lineNumber, match.line)) break;
+							}
+							const code = result.errored ? 2 : matchCount > 0 ? 0 : 1;
+							await finish(code, result.stderr, result.limitReached);
+							return;
+						}
+
+						if (!rgPath) return;
+						const args: string[] = ["--json", "--line-number", "--color=never", "--hidden"];
+						if (ignoreCase) args.push("--ignore-case");
+						if (literal) args.push("--fixed-strings");
+						if (glob) args.push("--glob", glob);
+						args.push("--", pattern, searchPath);
+
+						const child = spawn(rgPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+						const rl = createInterface({ input: child.stdout });
+						let stderr = "";
+						let aborted = false;
+						let killedDueToLimit = false;
+
+						const cleanup = () => {
+							rl.close();
+							signal?.removeEventListener("abort", onAbort);
+						};
+						const stopChild = (dueToLimit = false) => {
+							if (!child.killed) {
+								killedDueToLimit = dueToLimit;
+								child.kill();
+							}
+						};
+						const onAbort = () => {
+							aborted = true;
+							stopChild();
+						};
+						signal?.addEventListener("abort", onAbort, { once: true });
+						child.stderr?.on("data", (chunk) => {
+							stderr += chunk.toString();
+						});
+
+						// Collect matches during streaming, then format them after rg exits.
+						rl.on("line", (line) => {
+							if (!line.trim() || matchCount >= effectiveLimit) return;
+							let event: any;
+							try {
+								event = JSON.parse(line);
+							} catch {
+								return;
+							}
+							if (event.type === "match") {
+								if (recordMatch(event.data?.path?.text, event.data?.line_number, event.data?.lines?.text))
+									stopChild(true);
+							}
+						});
+
+						child.on("error", (error) => {
+							cleanup();
+							settle(() => reject(new Error(`Failed to run ripgrep: ${error.message}`)));
+						});
+						child.on("close", async (code) => {
+							cleanup();
+							if (aborted) {
+								settle(() => reject(new Error("Operation aborted")));
+								return;
+							}
+							await finish(code, stderr, killedDueToLimit);
 						});
 					} catch (err) {
 						settle(() => reject(err as Error));

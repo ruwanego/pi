@@ -36,6 +36,10 @@ export {
 	type GrepToolDetails,
 	type GrepToolInput,
 	type GrepToolOptions,
+	type NativeGrep,
+	type NativeGrepRequest,
+	type NativeGrepResult,
+	setNativeGrep,
 } from "./grep.ts";
 export {
 	createLsTool,

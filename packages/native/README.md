@@ -23,6 +23,13 @@ fd's own matching and ignore crates and settings, and returns fd's output lines 
 `setNativeFind(findFiles)` from `@earendil-works/pi-coding-agent`; it is not enabled by default. Unlike fd, results are
 always sorted (fd sorts only searches that finish within 100 ms).
 
+## Grep
+
+`grepFiles` is a Rust implementation of the ripgrep search behind the coding-agent `grep` tool (`crates/pi-grep`). It
+uses ripgrep's own crates and settings and returns ripgrep's match messages, stderr text and error status. Install it
+with `setNativeGrep(grepFiles)` from `@earendil-works/pi-coding-agent`; it is not enabled by default. Unlike ripgrep,
+matching files are reported in path order, and ripgrep configuration files (`RIPGREP_CONFIG_PATH`) are not read.
+
 ## Enable everything
 
 `PI_RUST=1 pi` switches every Rust implementation on at startup. From the SDK, call `enableRustFeatures()` from

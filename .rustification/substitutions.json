@@ -71,10 +71,28 @@
 		{
 			"id": "RUST-003",
 			"title": "coding-agent grep",
-			"status": "planned",
+			"status": "done",
+			"crates": [
+				"pi-grep",
+				"pi-native"
+			],
 			"packages": [
-				"packages/coding-agent"
-			]
+				"packages/coding-agent",
+				"packages/native"
+			],
+			"behaviourChange": false,
+			"enabledByDefault": false,
+			"summary": "In-process Rust port of the ripgrep search behind the grep tool (ignore + grep-regex + grep-searcher with ripgrep 15's configuration: matcher options, binary detection, BOM sniffing, mmap choice, ignore files, --glob root, stderr messages and exit status) behind setNativeGrep(grepFiles); also enabled by PI_RUST=1. ripgrep stays the default. Differences: matching files are reported in path order, and RIPGREP_CONFIG_PATH is not read.",
+			"parity": "packages/coding-agent/test/grep-native-parity.test.ts",
+			"benchmark": {
+				"note": "native/rg time ratio for one grep tool call (rg process spawn vs in-process search), linux-x64, Node 22.20, ripgrep 15.2.0; lower is faster",
+				"repoLiteral": 0.56,
+				"codingAgentSrcRegexGlob": 0.23,
+				"tuiPackageCommonWord": 0.3,
+				"repoNoMatch": 0.55,
+				"nodeModulesLiteral": 0.59,
+				"singleFile": 0.14
+			}
 		},
 		{
 			"id": "RUST-004",

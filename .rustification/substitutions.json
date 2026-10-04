@@ -11,7 +11,7 @@
 				"packages/native"
 			],
 			"behaviourChange": false,
-			"summary": "Rust workspace + @earendil-works/pi-native N-API loader exposing rustVersion(). Nothing in Pi depends on it yet."
+			"summary": "Rust workspace + @ruwanego/pi-native N-API loader exposing rustVersion(). Nothing in Pi depends on it yet."
 		},
 		{
 			"id": "RUST-001",

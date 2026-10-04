@@ -77,7 +77,7 @@ export interface NativeFindRequest {
 }
 
 /**
- * Alternative to spawning fd, e.g. `findFiles` from `@earendil-works/pi-native`. Must resolve to the lines fd would
+ * Alternative to spawning fd, e.g. `findFiles` from `@ruwanego/pi-native`. Must resolve to the lines fd would
  * print (absolute paths, directories with a trailing separator) and reject with the text fd would print to stderr.
  */
 export type NativeFind = (request: NativeFindRequest, signal?: AbortSignal) => Promise<string[]>;

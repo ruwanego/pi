@@ -1,6 +1,6 @@
 [package]
 name = "pi-native"
-description = "Rust N-API addon loaded by @earendil-works/pi-native"
+description = "Rust N-API addon loaded by @ruwanego/pi-native"
 publish = false
 version.workspace = true
 edition.workspace = true

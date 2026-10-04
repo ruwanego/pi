@@ -4,8 +4,8 @@
 
 ### Added
 
-- Experimental `setNativeFind()` hook that runs the default `find` tool search through an alternative to the fd binary, such as `findFiles` from `@earendil-works/pi-native` (Rust). fd remains the default.
-- Experimental `PI_RUST=1` environment variable and `enableRustFeatures()` / `disableRustFeatures()` to switch every Rust implementation from `@earendil-works/pi-native` on or off at once.
+- Experimental `setNativeFind()` hook that runs the default `find` tool search through an alternative to the fd binary, such as `findFiles` from `@ruwanego/pi-native` (Rust). fd remains the default.
+- Experimental `PI_RUST=1` environment variable and `enableRustFeatures()` / `disableRustFeatures()` to switch every Rust implementation from `@ruwanego/pi-native` on or off at once.
 
 ## [0.99.2] - 2026-09-30
 

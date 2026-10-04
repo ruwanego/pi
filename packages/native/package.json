@@ -1,5 +1,5 @@
 {
-	"name": "@earendil-works/pi-native",
+	"name": "@ruwanego/pi-native",
 	"version": "0.99.2",
 	"private": true,
 	"description": "Rust N-API bridge for pi",
@@ -27,7 +27,7 @@
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/earendil-works/pi.git",
+		"url": "git+https://github.com/ruwanego/pi.git",
 		"directory": "packages/native"
 	},
 	"engines": {

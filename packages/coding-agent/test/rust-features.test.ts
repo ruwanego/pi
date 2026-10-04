@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { protocolCodec } from "@earendil-works/pi-native";
 import { getNativeCodec } from "@earendil-works/pi-protocol";
+import { protocolCodec } from "@ruwanego/pi-native";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { disableRustFeatures, enableRustFeatures } from "../src/core/rust-features.ts";
 import { createFindToolDefinition } from "../src/core/tools/find.ts";

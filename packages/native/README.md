@@ -1,9 +1,9 @@
-# @earendil-works/pi-native
+# @ruwanego/pi-native
 
 Rust N-API bridge for pi. The Rust source lives in `crates/pi-native` at the repository root.
 
 ```ts
-import native from "@earendil-works/pi-native";
+import native from "@ruwanego/pi-native";
 
 native.rustVersion();
 ```

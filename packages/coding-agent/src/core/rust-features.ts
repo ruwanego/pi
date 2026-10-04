@@ -1,9 +1,9 @@
-import { findFiles, loadNative, protocolCodec } from "@earendil-works/pi-native";
 import { setNativeCodec } from "@earendil-works/pi-protocol";
+import { findFiles, loadNative, protocolCodec } from "@ruwanego/pi-native";
 import { setNativeFind } from "./tools/find.ts";
 
 /**
- * Experimental: switches every Rust substitution from `@earendil-works/pi-native` on at once.
+ * Experimental: switches every Rust substitution from `@ruwanego/pi-native` on at once.
  *
  * - `find` tool search (RUST-002), instead of the fd binary
  * - pi-protocol CBOR and framing (RUST-001), instead of the TypeScript codec

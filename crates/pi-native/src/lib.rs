@@ -1,4 +1,4 @@
-//! Native bridge for pi. Exports are loaded by `@earendil-works/pi-native`.
+//! Native bridge for pi. Exports are loaded by `@ruwanego/pi-native`.
 
 mod find;
 mod protocol;

@@ -1,4 +1,4 @@
-import { protocolCodec } from "@earendil-works/pi-native";
+import { protocolCodec } from "@ruwanego/pi-native";
 import { afterAll, describe, expect, test } from "vitest";
 import {
 	CborError,

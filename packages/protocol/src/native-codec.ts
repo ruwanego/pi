@@ -7,7 +7,7 @@ export interface NativeFrameDecoder {
 }
 
 /**
- * Alternative implementation of CBOR and framing, e.g. `protocolCodec` from `@earendil-works/pi-native`.
+ * Alternative implementation of CBOR and framing, e.g. `protocolCodec` from `@ruwanego/pi-native`.
  * Arguments and limits are validated before a codec is called. Protocol failures must throw an `Error` whose
  * `code` is `PI_CBOR_ERROR` or `PI_FRAME_ERROR`; they are rethrown as `CborError` / `FrameError`.
  */

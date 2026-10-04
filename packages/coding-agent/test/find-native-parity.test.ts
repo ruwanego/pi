@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { findFiles } from "@earendil-works/pi-native";
+import { findFiles } from "@ruwanego/pi-native";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createFindToolDefinition, type FindToolInput, setNativeFind } from "../src/core/tools/find.ts";
 import { getToolPath } from "../src/utils/tools-manager.ts";

@@ -10,6 +10,20 @@ import { findRenderers } from "./renderers/find.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateHead } from "./truncate.ts";
 
+/**
+ * Fast path for `path.relative(searchPath, resultPath)` when the result lies under the search path and is already
+ * normalized, which is how fd and the native search print paths. Returns undefined when `path.relative` is needed.
+ */
+function relativeToPrefix(resultPath: string, searchPath: string, pathModule: path.PlatformPath): string | undefined {
+	// Windows paths compare case-insensitively and accept either separator; leave them to path.relative.
+	if (pathModule.sep !== "/") return undefined;
+	const prefix = searchPath.endsWith("/") ? searchPath : `${searchPath}/`;
+	if (!resultPath.startsWith(prefix) || pathModule.normalize(searchPath) !== searchPath) return undefined;
+	const relative = resultPath.slice(prefix.length).replace(/\/+$/, "");
+	if (!relative || /(^|\/)\.{0,2}(\/|$)/.test(relative)) return undefined;
+	return relative;
+}
+
 /** Relativize a find result against the search root and normalize it to posix separators. */
 export function relativizeFindResultPath(
 	resultPath: string,
@@ -18,7 +32,9 @@ export function relativizeFindResultPath(
 ): string {
 	const hadTrailingSeparator =
 		resultPath.endsWith(pathModule.sep) || (pathModule.sep === "\\" && resultPath.endsWith("/"));
-	const relativePath = pathModule.isAbsolute(resultPath) ? pathModule.relative(searchPath, resultPath) : resultPath;
+	const relativePath = !pathModule.isAbsolute(resultPath)
+		? resultPath
+		: (relativeToPrefix(resultPath, searchPath, pathModule) ?? pathModule.relative(searchPath, resultPath));
 	const posixPath = relativePath.split(pathModule.sep).join("/");
 	return hadTrailingSeparator && !posixPath.endsWith("/") ? `${posixPath}/` : posixPath;
 }

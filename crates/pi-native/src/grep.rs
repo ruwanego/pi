@@ -22,6 +22,8 @@ pub struct NativeGrepOptions {
 	pub fixed_strings: bool,
 	/// Stop after this many matches. Must be a positive integer.
 	pub max_matches: f64,
+	/// Lines of context to return around each match; absent or `0` for none.
+	pub context: Option<f64>,
 }
 
 /// One ripgrep `match` message. `path` and `line` are absent when ripgrep would report them as bytes.
@@ -30,6 +32,9 @@ pub struct NativeGrepMatch {
 	pub path: Option<String>,
 	pub line_number: f64,
 	pub line: Option<String>,
+	/// With context requested: the first line number of `context_lines`, as the grep tool reads the file.
+	pub context_start: Option<f64>,
+	pub context_lines: Option<Vec<String>>,
 }
 
 #[napi(object, js_name = "NativeGrepResult")]
@@ -63,6 +68,7 @@ impl NativeGrepSearch {
 				fixed_strings: options.fixed_strings,
 				// Saturating float-to-int conversion; values past usize::MAX are effectively unlimited.
 				max_matches: Some(options.max_matches as usize),
+				context: options.context.map_or(0, |context| context as usize),
 			},
 			cancelled: Arc::new(AtomicBool::new(false)),
 		}
@@ -101,10 +107,18 @@ impl Task for GrepTask {
 			matches: output
 				.matches
 				.into_iter()
-				.map(|m| NativeGrepMatch {
-					path: m.path,
-					line_number: m.line_number as f64,
-					line: m.line,
+				.map(|m| {
+					let (context_start, context_lines) = match m.context {
+						Some(block) => (Some(block.start as f64), Some(block.lines)),
+						None => (None, None),
+					};
+					NativeGrepMatch {
+						path: m.path,
+						line_number: m.line_number as f64,
+						line: m.line,
+						context_start,
+						context_lines,
+					}
 				})
 				.collect(),
 			limit_reached: output.limit_reached,

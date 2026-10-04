@@ -9,6 +9,7 @@
 //! One intentional difference: results are always sorted. fd sorts only when the search finishes within 100 ms,
 //! otherwise it streams results in walk order.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -59,61 +60,56 @@ struct Match {
 /// Runs the search and returns fd's output lines, sorted. Returns early with the matches found so far once
 /// `cancel` is set.
 pub fn find(options: &FindOptions, cancel: &AtomicBool) -> Result<Vec<String>, FindError> {
+	find_with_budget(options, cancel, SEQUENTIAL_BUDGET)
+}
+
+fn find_with_budget(options: &FindOptions, cancel: &AtomicBool, budget: usize) -> Result<Vec<String>, FindError> {
 	let search_path = search_path(&options.search_path)?;
 	ensure_pattern_is_not_a_path(options)?;
 	let regex = build_regex(&options.pattern)?;
-	let walker = build_walker(&search_path, options.require_git);
-	let max_results = options.max_results.filter(|&max| max > 0);
+	let mut walker = build_walker(&search_path, options.require_git);
+	let search = Search {
+		options,
+		regex,
+		max_results: options.max_results.filter(|&max| max > 0),
+		cancel,
+		matches: Mutex::new(Vec::new()),
+		done: AtomicBool::new(false),
+	};
 
-	let matches = Mutex::new(Vec::<Match>::new());
-	let done = AtomicBool::new(false);
-	walker.run(|| {
-		let regex = &regex;
-		let matches = &matches;
-		let done = &done;
-		Box::new(move |entry| {
-			if done.load(Ordering::Relaxed) || cancel.load(Ordering::Relaxed) {
-				return WalkState::Quit;
+	// Starting threads costs more than walking a small tree, so walk on this thread first and switch to the
+	// parallel walker (starting over) only if the tree turns out to be large.
+	let mut finished = !is_large_tree(&search_path);
+	if finished {
+		for (visited, entry) in walker.build().enumerate() {
+			// The sequential walker reports traversal errors differently from fd's parallel walker; let the
+			// parallel walker handle them.
+			if entry.is_err() {
+				finished = false;
+				break;
 			}
-			let (path, is_dir) = match entry {
-				// Skip the root directory entry.
-				Ok(entry) if entry.depth() == 0 => return WalkState::Continue,
-				Ok(entry) => {
-					let is_dir = entry.file_type().is_some_and(|file_type| file_type.is_dir());
-					(entry.into_path(), is_dir)
-				}
-				Err(ignore::Error::WithPath { path, err }) if is_broken_symlink(&path, &err) => (path, false),
-				// fd hides filesystem errors unless --show-errors is passed.
-				Err(_) => return WalkState::Continue,
-			};
+			if matches!(search.visit(entry), WalkState::Quit) {
+				break;
+			}
+			if visited >= budget {
+				finished = false;
+				remember_tree_size(&search_path, true);
+				break;
+			}
+		}
+		if finished {
+			remember_tree_size(&search_path, false);
+		}
+	}
+	if !finished {
+		search.matches.lock().expect("matches lock").clear();
+		walker.threads(default_threads()).build_parallel().run(|| {
+			let search = &search;
+			Box::new(move |entry| search.visit(entry))
+		});
+	}
 
-			let haystack = if options.full_path {
-				path.as_os_str()
-			} else {
-				match path.file_name() {
-					Some(name) => name,
-					None => return WalkState::Continue,
-				}
-			};
-			if !regex.is_match(&os_str_bytes(haystack)) {
-				return WalkState::Continue;
-			}
-
-			let mut matches = matches.lock().expect("matches lock");
-			if max_results.is_some_and(|max| matches.len() >= max) {
-				done.store(true, Ordering::Relaxed);
-				return WalkState::Quit;
-			}
-			matches.push(Match { path, is_dir });
-			if max_results.is_some_and(|max| matches.len() >= max) {
-				done.store(true, Ordering::Relaxed);
-				return WalkState::Quit;
-			}
-			WalkState::Continue
-		})
-	});
-
-	let mut matches = matches.into_inner().expect("matches lock");
+	let mut matches = search.matches.into_inner().expect("matches lock");
 	matches.sort_by(|a, b| a.path.cmp(&b.path));
 	let separator = path_separator();
 	Ok(matches
@@ -129,6 +125,89 @@ pub fn find(options: &FindOptions, cancel: &AtomicBool) -> Result<Vec<String>, F
 			line
 		})
 		.collect())
+}
+
+/// Search paths whose last search did not finish within the sequential budget. Later searches of the same path
+/// start with the parallel walker instead of spending the budget again. This only affects speed.
+static LARGE_TREES: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
+const LARGE_TREES_CAPACITY: usize = 1024;
+
+fn is_large_tree(path: &Path) -> bool {
+	LARGE_TREES
+		.lock()
+		.expect("large trees lock")
+		.as_ref()
+		.is_some_and(|trees| trees.contains(path))
+}
+
+fn remember_tree_size(path: &Path, large: bool) {
+	let mut trees = LARGE_TREES.lock().expect("large trees lock");
+	let trees = trees.get_or_insert_with(HashSet::new);
+	if !large {
+		trees.remove(path);
+		return;
+	}
+	if trees.len() >= LARGE_TREES_CAPACITY {
+		trees.clear();
+	}
+	trees.insert(path.to_path_buf());
+}
+
+/// How many entries a search visits on the calling thread before switching to the parallel walker. Counting
+/// entries instead of time keeps the choice (and the remembered tree size) independent of machine load.
+const SEQUENTIAL_BUDGET: usize = 500;
+
+struct Search<'a> {
+	options: &'a FindOptions,
+	regex: Regex,
+	max_results: Option<usize>,
+	cancel: &'a AtomicBool,
+	matches: Mutex<Vec<Match>>,
+	done: AtomicBool,
+}
+
+impl Search<'_> {
+	/// fd's per-entry filter (`walk.rs`, `spawn_senders`) for the options the find tool uses.
+	fn visit(&self, entry: Result<ignore::DirEntry, ignore::Error>) -> WalkState {
+		if self.done.load(Ordering::Relaxed) || self.cancel.load(Ordering::Relaxed) {
+			return WalkState::Quit;
+		}
+		let (path, is_dir) = match entry {
+			// Skip the root directory entry.
+			Ok(entry) if entry.depth() == 0 => return WalkState::Continue,
+			Ok(entry) => {
+				let is_dir = entry.file_type().is_some_and(|file_type| file_type.is_dir());
+				(entry.into_path(), is_dir)
+			}
+			Err(ignore::Error::WithPath { path, err }) if is_broken_symlink(&path, &err) => (path, false),
+			// fd hides filesystem errors unless --show-errors is passed.
+			Err(_) => return WalkState::Continue,
+		};
+
+		let haystack = if self.options.full_path {
+			path.as_os_str()
+		} else {
+			match path.file_name() {
+				Some(name) => name,
+				None => return WalkState::Continue,
+			}
+		};
+		if !self.regex.is_match(&os_str_bytes(haystack)) {
+			return WalkState::Continue;
+		}
+
+		let mut matches = self.matches.lock().expect("matches lock");
+		if self.max_results.is_some_and(|max| matches.len() >= max) {
+			self.done.store(true, Ordering::Relaxed);
+			return WalkState::Quit;
+		}
+		matches.push(Match { path, is_dir });
+		if self.max_results.is_some_and(|max| matches.len() >= max) {
+			self.done.store(true, Ordering::Relaxed);
+			return WalkState::Quit;
+		}
+		WalkState::Continue
+	}
 }
 
 /// fd's `Opts::search_paths` + `normalize_path` for a single path argument.
@@ -190,7 +269,7 @@ fn build_regex(pattern: &str) -> Result<Regex, FindError> {
 }
 
 /// fd's walker configuration for `--hidden` with every ignore source enabled.
-fn build_walker(search_path: &Path, require_git: bool) -> ignore::WalkParallel {
+fn build_walker(search_path: &Path, require_git: bool) -> WalkBuilder {
 	let mut builder = WalkBuilder::new(search_path);
 	builder
 		.hidden(false)
@@ -211,7 +290,7 @@ fn build_walker(search_path: &Path, require_git: bool) -> ignore::WalkParallel {
 			let _ = builder.add_ignore(global_ignore_file);
 		}
 	}
-	builder.threads(default_threads()).build_parallel()
+	builder
 }
 
 fn default_threads() -> usize {
@@ -418,6 +497,30 @@ mod tests {
 				missing.display()
 			)
 		);
+	}
+
+	#[test]
+	fn parallel_restart_matches_sequential_walk() {
+		let dir = TempDir::new("restart");
+		dir.file(".gitignore", "*.log\n").file("x.log", "");
+		for a in 0..20 {
+			for b in 0..5 {
+				dir.file(&format!("d{a}/e{b}/f.txt"), "")
+					.file(&format!("d{a}/e{b}/g.rs"), "");
+			}
+		}
+		let options = FindOptions {
+			pattern: "*".to_owned(),
+			search_path: dir.0.clone(),
+			full_path: false,
+			require_git: false,
+			max_results: None,
+		};
+		let cancel = AtomicBool::new(false);
+		let sequential = find_with_budget(&options, &cancel, usize::MAX).unwrap();
+		let parallel = find_with_budget(&options, &cancel, 0).unwrap();
+		assert_eq!(sequential.len(), 20 * 5 * 2 + 20 * 5 + 20 + 1);
+		assert_eq!(sequential, parallel);
 	}
 
 	#[test]

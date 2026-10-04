@@ -156,6 +156,8 @@ describe.skipIf(!rgPath)("grep: native search matches ripgrep", () => {
 		{ pattern: "needle", path: "binary.dat" },
 		{ pattern: "needle", path: "utf16.txt" },
 		{ pattern: "needle", path: "invalid-utf8.txt", context: 1 },
+		{ pattern: "needle", path: "utf16.txt", context: 1 },
+		{ pattern: "third", path: "crlf.txt", context: 5 },
 		{ pattern: "needle", path: "missing" },
 		{ pattern: "-x" },
 		{ pattern: "--help" },

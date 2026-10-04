@@ -22,10 +22,17 @@ export interface NativeGrepOptions {
 	ignoreCase: boolean;
 	fixedStrings: boolean;
 	maxMatches: number;
+	context?: number;
 }
 
 export interface NativeGrepResult {
-	matches: Array<{ path?: string; lineNumber: number; line?: string }>;
+	matches: Array<{
+		path?: string;
+		lineNumber: number;
+		line?: string;
+		contextStart?: number;
+		contextLines?: string[];
+	}>;
 	limitReached: boolean;
 	stderr: string;
 	errored: boolean;

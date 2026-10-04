@@ -10,6 +10,7 @@
 //! Differences: matching files are reported in path order (ripgrep reports them in completion order), and ripgrep
 //! configuration files (`RIPGREP_CONFIG_PATH`) are not read.
 
+use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -34,6 +35,8 @@ pub struct GrepOptions {
 	pub fixed_strings: bool,
 	/// Stop after this many matches, like the tool killing ripgrep. `None` means unlimited.
 	pub max_matches: Option<usize>,
+	/// Lines of context the grep tool shows around each match; see [`GrepMatch::context`]. `0` for none.
+	pub context: usize,
 }
 
 /// One `match` message: `path.text`, `line_number` and `lines.text`. Paths and lines that are not valid UTF-8 are
@@ -43,6 +46,16 @@ pub struct GrepMatch {
 	pub path: Option<String>,
 	pub line_number: u64,
 	pub line: Option<String>,
+	/// With `context > 0`, the lines the grep tool shows for this match, read from the file the way the tool
+	/// reads it. `None` if the file could not be read.
+	pub context: Option<ContextBlock>,
+}
+
+/// Lines `start..start + lines.len()` (1-based) of a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextBlock {
+	pub start: u64,
+	pub lines: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -74,15 +87,14 @@ fn rg_message(message: impl std::fmt::Display) -> String {
 
 /// Runs the search. Returns early with the matches found so far once `cancel` is set.
 pub fn grep(options: &GrepOptions, cancel: &AtomicBool) -> Result<GrepOutput, GrepError> {
+	grep_with_budget(options, cancel, SEQUENTIAL_BUDGET)
+}
+
+fn grep_with_budget(options: &GrepOptions, cancel: &AtomicBool, budget: usize) -> Result<GrepOutput, GrepError> {
 	let cwd = current_dir()?;
 	let matcher = build_matcher(options)?;
 	let overrides = build_overrides(&cwd, options.glob.as_deref())?;
 	let is_one_file = !options.search_path.is_dir();
-	let threads = if is_one_file {
-		1
-	} else {
-		std::thread::available_parallelism().map_or(1, |n| n.get()).min(12)
-	};
 	let mmap = if is_one_file && options.search_path.is_file() {
 		// SAFETY: same choice as ripgrep; a file truncated while mapped can make the process abort.
 		unsafe { MmapChoice::auto() }
@@ -95,7 +107,6 @@ pub fn grep(options: &GrepOptions, cancel: &AtomicBool) -> Result<GrepOutput, Gr
 
 	let mut walk_builder = WalkBuilder::new(&options.search_path);
 	walk_builder
-		.threads(threads)
 		.overrides(overrides)
 		.hidden(false)
 		.parents(true)
@@ -111,17 +122,49 @@ pub fn grep(options: &GrepOptions, cancel: &AtomicBool) -> Result<GrepOutput, Gr
 	let state = State {
 		matcher: &matcher,
 		max_matches: options.max_matches,
+		context: options.context,
 		count: AtomicUsize::new(0),
 		cancel,
 		files: Mutex::new(Vec::new()),
 		messages: Mutex::new(Vec::new()),
 		errored: AtomicBool::new(false),
 	};
-	walk_builder.build_parallel().run(|| {
-		let state = &state;
-		let mut searcher = searcher.clone();
-		Box::new(move |result| state.visit(&mut searcher, result))
-	});
+
+	// Starting threads costs more than searching a small tree, so search on this thread first and switch to
+	// ripgrep's parallel walker (starting over) only if the tree turns out to be large. ripgrep itself
+	// uses one thread for a single file.
+	let mut finished = is_one_file || !is_large_tree(&options.search_path);
+	if finished {
+		let mut sequential_searcher = searcher.clone();
+		for (visited, result) in walk_builder.build().enumerate() {
+			// The sequential walker words traversal errors differently from ripgrep's parallel walker; let the
+			// parallel walker report them.
+			if result.is_err() {
+				finished = false;
+				break;
+			}
+			if matches!(state.visit(&mut sequential_searcher, result), WalkState::Quit) {
+				break;
+			}
+			if !is_one_file && visited >= budget {
+				finished = false;
+				remember_tree_size(&options.search_path, true);
+				break;
+			}
+		}
+		if finished && !is_one_file {
+			remember_tree_size(&options.search_path, false);
+		}
+	}
+	if !finished {
+		state.reset();
+		let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(12);
+		walk_builder.threads(threads).build_parallel().run(|| {
+			let state = &state;
+			let mut searcher = searcher.clone();
+			Box::new(move |result| state.visit(&mut searcher, result))
+		});
+	}
 
 	let limit_reached = options
 		.max_matches
@@ -140,9 +183,40 @@ pub fn grep(options: &GrepOptions, cancel: &AtomicBool) -> Result<GrepOutput, Gr
 	})
 }
 
+/// Search paths whose last search did not finish within the sequential budget. Later searches of the same path
+/// start with the parallel walker instead of spending the budget again. This only affects speed.
+static LARGE_TREES: Mutex<Option<HashSet<PathBuf>>> = Mutex::new(None);
+const LARGE_TREES_CAPACITY: usize = 1024;
+
+fn is_large_tree(path: &Path) -> bool {
+	LARGE_TREES
+		.lock()
+		.expect("large trees lock")
+		.as_ref()
+		.is_some_and(|trees| trees.contains(path))
+}
+
+fn remember_tree_size(path: &Path, large: bool) {
+	let mut trees = LARGE_TREES.lock().expect("large trees lock");
+	let trees = trees.get_or_insert_with(HashSet::new);
+	if !large {
+		trees.remove(path);
+		return;
+	}
+	if trees.len() >= LARGE_TREES_CAPACITY {
+		trees.clear();
+	}
+	trees.insert(path.to_path_buf());
+}
+
+/// How many entries a search visits on the calling thread before switching to the parallel walker. Counting
+/// entries instead of time keeps the choice (and the remembered tree size) independent of machine load.
+const SEQUENTIAL_BUDGET: usize = 250;
+
 struct State<'a> {
 	matcher: &'a RegexMatcher,
 	max_matches: Option<usize>,
+	context: usize,
 	count: AtomicUsize,
 	cancel: &'a AtomicBool,
 	files: Mutex<Vec<(PathBuf, Vec<GrepMatch>)>>,
@@ -156,6 +230,14 @@ impl State<'_> {
 			|| self
 				.max_matches
 				.is_some_and(|max| self.count.load(Ordering::Relaxed) >= max)
+	}
+
+	/// Forgets everything found so far, before the search starts over.
+	fn reset(&self) {
+		self.count.store(0, Ordering::Relaxed);
+		self.files.lock().expect("files lock").clear();
+		self.messages.lock().expect("messages lock").clear();
+		self.errored.store(false, Ordering::Relaxed);
 	}
 
 	fn message(&self, message: String, error: bool) {
@@ -203,7 +285,10 @@ impl State<'_> {
 			self.message(rg_message(format!("{}: {error}", path.display())), true);
 		}
 		if !sink.matches.is_empty() {
-			let matches = sink.matches;
+			let mut matches = sink.matches;
+			if self.context > 0 {
+				add_context(path, self.context, &mut matches);
+			}
 			self.files
 				.lock()
 				.expect("files lock")
@@ -235,8 +320,32 @@ impl Sink for Collect<'_, '_> {
 			path: self.path.clone(),
 			line_number: mat.line_number().unwrap_or(0),
 			line: std::str::from_utf8(mat.bytes()).ok().map(str::to_owned),
+			context: None,
 		});
 		Ok(!self.state.done())
+	}
+}
+
+/// Fills in [`GrepMatch::context`] the way the grep tool's `formatBlock` reads a file: decoded as UTF-8 with
+/// replacement characters, `\r\n` and lone `\r` treated as line breaks, lines clamped to the file.
+fn add_context(path: &Path, context: usize, matches: &mut [GrepMatch]) {
+	let Ok(bytes) = std::fs::read(path) else {
+		return;
+	};
+	let text = String::from_utf8_lossy(&bytes)
+		.replace("\r\n", "\n")
+		.replace('\r', "\n");
+	let lines: Vec<&str> = text.split('\n').collect();
+	for m in matches {
+		let line_number = m.line_number as usize;
+		let start = line_number.saturating_sub(context).max(1);
+		let end = (line_number + context).min(lines.len());
+		m.context = Some(ContextBlock {
+			start: start as u64,
+			lines: (start..=end)
+				.map(|current| lines.get(current - 1).copied().unwrap_or("").to_owned())
+				.collect(),
+		});
 	}
 }
 
@@ -339,6 +448,7 @@ mod tests {
 			ignore_case: false,
 			fixed_strings: false,
 			max_matches: None,
+			context: 0,
 		}
 	}
 
@@ -442,6 +552,46 @@ mod tests {
 		assert_eq!(
 			grep(&opts, &AtomicBool::new(false)).unwrap_err().0,
 			"rg: error parsing glob '[': unclosed character class; missing ']'"
+		);
+	}
+
+	#[test]
+	fn parallel_restart_matches_sequential_search() {
+		let dir = TempDir::new("restart");
+		for a in 0..20 {
+			for b in 0..5 {
+				dir.file(&format!("d{a}/f{b}.txt"), b"x\nneedle\ny\nneedle\n");
+			}
+		}
+		let opts = options(&dir.0, "needle");
+		let cancel = AtomicBool::new(false);
+		let sequential = grep_with_budget(&opts, &cancel, usize::MAX).unwrap();
+		let parallel = grep_with_budget(&opts, &cancel, 0).unwrap();
+		assert_eq!(sequential.matches.len(), 200);
+		assert_eq!(sequential.matches, parallel.matches);
+	}
+
+	#[test]
+	fn context_lines_follow_the_tool_line_splitting() {
+		let dir = TempDir::new("context");
+		dir.file("a.txt", b"one\r\ntwo\rthree\nneedle\nfive\n");
+		let mut opts = options(&dir.0, "needle");
+		opts.context = 2;
+		let output = grep(&opts, &AtomicBool::new(false)).unwrap();
+		// "\r" alone splits lines for the tool, but ripgrep numbers "two\rthree" as one line (line 2).
+		assert_eq!(output.matches[0].line_number, 3);
+		assert_eq!(
+			output.matches[0].context,
+			Some(ContextBlock {
+				start: 1,
+				lines: vec![
+					"one".into(),
+					"two".into(),
+					"three".into(),
+					"needle".into(),
+					"five".into()
+				]
+			})
 		);
 	}
 

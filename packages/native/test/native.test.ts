@@ -1,7 +1,9 @@
 import assert from "node:assert";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, sep } from "node:path";
 import { describe, it } from "node:test";
-import native, { loadNative, protocolCodec, rustVersion } from "../src/index.ts";
+import native, { findFiles, loadNative, protocolCodec, rustVersion } from "../src/index.ts";
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
 	version: string;
@@ -37,5 +39,37 @@ describe("protocolCodec", () => {
 		});
 		const decoder = protocolCodec.createFrameDecoder(1);
 		assert.throws(() => decoder.push(new Uint8Array([0, 0, 0, 2])), { code: "PI_FRAME_ERROR" });
+	});
+});
+
+describe("findFiles", () => {
+	const request = (searchPath: string, pattern: string, maxResults = 0) => ({
+		pattern,
+		searchPath,
+		fullPath: false,
+		requireGit: false,
+		maxResults,
+	});
+
+	it("prints absolute paths in fd's format", async () => {
+		const root = mkdtempSync(join(tmpdir(), "pi-native-find-"));
+		try {
+			mkdirSync(join(root, "src.ts"));
+			writeFileSync(join(root, "a.ts"), "");
+			writeFileSync(join(root, "b.js"), "");
+			assert.deepStrictEqual(await findFiles(request(root, "*.ts")), [
+				join(root, "a.ts"),
+				`${join(root, "src.ts")}${sep}`,
+			]);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects with fd's error text", async () => {
+		await assert.rejects(findFiles(request(tmpdir(), "[")), {
+			message: "[fd error]: error parsing glob '[': unclosed character class; missing ']'",
+		});
+		await assert.rejects(findFiles(request(tmpdir(), "*", 2.5)), /invalid value '2.5' for '--max-results <count>'/);
 	});
 });

@@ -45,10 +45,28 @@
 		{
 			"id": "RUST-002",
 			"title": "coding-agent find",
-			"status": "planned",
+			"status": "done",
+			"crates": [
+				"pi-find",
+				"pi-native"
+			],
 			"packages": [
-				"packages/coding-agent"
-			]
+				"packages/coding-agent",
+				"packages/native"
+			],
+			"behaviourChange": false,
+			"enabledByDefault": false,
+			"summary": "In-process Rust port of the fd search behind the find tool (ignore + globset, same settings, output and error text as fd) behind setNativeFind(findFiles). fd stays the default. Only difference: results are always sorted; fd sorts only searches that finish within 100 ms.",
+			"parity": "packages/coding-agent/test/find-native-parity.test.ts",
+			"benchmark": {
+				"note": "native/fd time ratio for one find tool call (fd process spawn vs in-process search), linux-x64, Node 22.20, fd 10.5.0; lower is faster",
+				"repoTsFiles": 0.33,
+				"repoPathGlob": 0.21,
+				"repoPackageJson": 0.17,
+				"tuiPackageTsFiles": 0.28,
+				"nodeModulesJsLimit1000": 0.2,
+				"nodeModulesDtsUnlimited": 0.56
+			}
 		},
 		{
 			"id": "RUST-003",

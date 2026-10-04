@@ -62,6 +62,74 @@ const defaultFindOperations: FindOperations = {
 	glob: () => [],
 };
 
+/** Arguments of one fd invocation, as the find tool would pass them on the command line. */
+export interface NativeFindRequest {
+	/** Glob pattern after the tool's rewriting: path patterns gain a leading globstar. */
+	pattern: string;
+	/** Absolute directory to search. */
+	searchPath: string;
+	/** `--full-path`. */
+	fullPath: boolean;
+	/** `false` means `--no-require-git`. */
+	requireGit: boolean;
+	/** `--max-results`. */
+	maxResults: number;
+}
+
+/**
+ * Alternative to spawning fd, e.g. `findFiles` from `@earendil-works/pi-native`. Must resolve to the lines fd would
+ * print (absolute paths, directories with a trailing separator) and reject with the text fd would print to stderr.
+ */
+export type NativeFind = (request: NativeFindRequest, signal?: AbortSignal) => Promise<string[]>;
+
+let nativeFind: NativeFind | undefined;
+
+/**
+ * Experimental: runs the default find search through `find` instead of the fd binary, or back through fd when
+ * `undefined`. Custom `FindOperations` are unaffected.
+ */
+export function setNativeFind(find: NativeFind | undefined): void {
+	nativeFind = find;
+}
+
+/** Builds the tool result from fd's output lines. */
+function formatFdOutput(lines: string[], searchPath: string, effectiveLimit: number) {
+	if (!lines.join("\n")) {
+		return { content: [{ type: "text" as const, text: "No files found matching pattern" }], details: undefined };
+	}
+
+	const relativized: string[] = [];
+	for (const rawLine of lines) {
+		const line = rawLine.replace(/\r$/, "").trim();
+		if (!line) continue;
+		relativized.push(relativizeFindResultPath(line, searchPath));
+	}
+
+	const resultLimitReached = relativized.length >= effectiveLimit;
+	const rawOutput = relativized.join("\n");
+	const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
+	let resultOutput = truncation.content;
+	const details: FindToolDetails = {};
+	const notices: string[] = [];
+	if (resultLimitReached) {
+		notices.push(
+			`${effectiveLimit} results limit reached. Use limit=${effectiveLimit * 2} for more, or refine pattern`,
+		);
+		details.resultLimitReached = effectiveLimit;
+	}
+	if (truncation.truncated) {
+		notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
+		details.truncation = truncation;
+	}
+	if (notices.length > 0) {
+		resultOutput += `\n\n[${notices.join(". ")}]`;
+	}
+	return {
+		content: [{ type: "text" as const, text: resultOutput }],
+		details: Object.keys(details).length > 0 ? details : undefined,
+	};
+}
+
 export interface FindToolOptions {
 	/** Custom operations for find. Default: local filesystem plus fd */
 	operations?: FindOperations;
@@ -168,14 +236,11 @@ export function createFindToolDefinition(
 							return;
 						}
 
-						// Default implementation uses fd.
-						const fdPath = await ensureTool("fd");
+						// Default implementation uses fd, or the native replacement when one is installed.
+						const activeNativeFind = nativeFind;
+						const fdPath = activeNativeFind ? undefined : await ensureTool("fd");
 						if (signal?.aborted) {
 							settle(() => reject(new Error("Operation aborted")));
-							return;
-						}
-						if (!fdPath) {
-							settle(() => reject(new Error("fd is not available and could not be downloaded")));
 							return;
 						}
 
@@ -202,7 +267,8 @@ export function createFindToolDefinition(
 						// mode it matches against the absolute candidate path, so a path-containing
 						// pattern like 'src/**/*.spec.ts' needs a leading '**/' to match anything.
 						let effectivePattern = pattern;
-						if (pattern.includes("/")) {
+						const fullPath = pattern.includes("/");
+						if (fullPath) {
 							args.push("--full-path");
 							if (!pattern.startsWith("/") && !pattern.startsWith("**/") && pattern !== "**") {
 								effectivePattern = `**/${pattern}`;
@@ -212,6 +278,30 @@ export function createFindToolDefinition(
 								effectivePattern = effectivePattern.replaceAll("/", String.raw`[/\\]`);
 						}
 						args.push("--", effectivePattern, searchPath);
+
+						if (activeNativeFind) {
+							const lines = await activeNativeFind(
+								{
+									pattern: effectivePattern,
+									searchPath,
+									fullPath,
+									requireGit: insideGitRepo,
+									maxResults: effectiveLimit,
+								},
+								signal,
+							);
+							if (signal?.aborted) {
+								settle(() => reject(new Error("Operation aborted")));
+								return;
+							}
+							settle(() => resolve(formatFdOutput(lines, searchPath, effectiveLimit)));
+							return;
+						}
+
+						if (!fdPath) {
+							settle(() => reject(new Error("fd is not available and could not be downloaded")));
+							return;
+						}
 
 						const child = spawn(fdPath, args, { stdio: ["ignore", "pipe", "pipe"] });
 						const rl = createInterface({ input: child.stdout });
@@ -247,56 +337,14 @@ export function createFindToolDefinition(
 								settle(() => reject(new Error("Operation aborted")));
 								return;
 							}
-							const output = lines.join("\n");
 							if (code !== 0) {
 								const errorMsg = stderr.trim() || `fd exited with code ${code}`;
-								if (!output) {
+								if (!lines.join("\n")) {
 									settle(() => reject(new Error(errorMsg)));
 									return;
 								}
 							}
-							if (!output) {
-								settle(() =>
-									resolve({
-										content: [{ type: "text", text: "No files found matching pattern" }],
-										details: undefined,
-									}),
-								);
-								return;
-							}
-
-							const relativized: string[] = [];
-							for (const rawLine of lines) {
-								const line = rawLine.replace(/\r$/, "").trim();
-								if (!line) continue;
-								relativized.push(relativizeFindResultPath(line, searchPath));
-							}
-
-							const resultLimitReached = relativized.length >= effectiveLimit;
-							const rawOutput = relativized.join("\n");
-							const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
-							let resultOutput = truncation.content;
-							const details: FindToolDetails = {};
-							const notices: string[] = [];
-							if (resultLimitReached) {
-								notices.push(
-									`${effectiveLimit} results limit reached. Use limit=${effectiveLimit * 2} for more, or refine pattern`,
-								);
-								details.resultLimitReached = effectiveLimit;
-							}
-							if (truncation.truncated) {
-								notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
-								details.truncation = truncation;
-							}
-							if (notices.length > 0) {
-								resultOutput += `\n\n[${notices.join(". ")}]`;
-							}
-							settle(() =>
-								resolve({
-									content: [{ type: "text", text: resultOutput }],
-									details: Object.keys(details).length > 0 ? details : undefined,
-								}),
-							);
+							settle(() => resolve(formatFdOutput(lines, searchPath, effectiveLimit)));
 						});
 					} catch (e) {
 						if (signal?.aborted) {

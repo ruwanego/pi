@@ -77,6 +77,7 @@
 	},
 	"devDependencies": {
 		"@earendil-works/pi-client": "^0.99.2",
+		"@earendil-works/pi-native": "^0.99.2",
 		"@earendil-works/pi-protocol": "^0.99.2",
 		"@earendil-works/pi-server": "^0.99.2",
 		"@types/cross-spawn": "6.0.6",

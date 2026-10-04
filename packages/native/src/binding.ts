@@ -2,6 +2,19 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+export interface NativeFindOptions {
+	pattern: string;
+	searchPath: string;
+	fullPath: boolean;
+	requireGit: boolean;
+	maxResults: number;
+}
+
+export interface NativeFindSearchHandle {
+	run(): Promise<string[]>;
+	cancel(): void;
+}
+
 export interface NativeFrameDecoderHandle {
 	push(chunk: Uint8Array): Uint8Array[];
 	end(): void;
@@ -14,6 +27,7 @@ export interface NativeBinding {
 	cborDecode(bytes: Uint8Array, maxByteLength: number, maxContainerLength: number, maxDepth: number): unknown;
 	frameEncode(payload: Uint8Array): Uint8Array;
 	NativeFrameDecoder: new (maxFrameLength: number) => NativeFrameDecoderHandle;
+	NativeFindSearch: new (options: NativeFindOptions) => NativeFindSearchHandle;
 }
 
 const cjsRequire = createRequire(import.meta.url);

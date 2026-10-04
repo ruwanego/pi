@@ -1,0 +1,16 @@
+[package]
+name = "pi-find"
+description = "Glob file search with fd's matching and ignore rules, for the coding-agent find tool"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+etcetera = "=0.10.0"
+globset = "=0.4.20"
+ignore = "=0.4.33"
+regex = "=1.13.1"
+regex-syntax = "=0.8.11"

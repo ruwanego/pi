@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Experimental `setNativeFind()` hook that runs the default `find` tool search through an alternative to the fd binary, such as `findFiles` from `@earendil-works/pi-native` (Rust). fd remains the default.
+
 ## [0.99.2] - 2026-09-30
 
 ### New Features

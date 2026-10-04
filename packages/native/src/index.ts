@@ -1,6 +1,14 @@
 import { loadNative } from "./binding.ts";
 
-export { getNativeModulePath, loadNative, type NativeBinding, type NativeFrameDecoderHandle } from "./binding.ts";
+export {
+	getNativeModulePath,
+	loadNative,
+	type NativeBinding,
+	type NativeFindOptions,
+	type NativeFindSearchHandle,
+	type NativeFrameDecoderHandle,
+} from "./binding.ts";
+export { findFiles } from "./find.ts";
 export { type NativeCborLimits, protocolCodec } from "./protocol.ts";
 
 /** Version of the Rust crate behind the bridge. */

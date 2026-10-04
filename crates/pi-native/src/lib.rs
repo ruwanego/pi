@@ -1,5 +1,6 @@
 //! Native bridge for pi. Exports are loaded by `@earendil-works/pi-native`.
 
+mod find;
 mod protocol;
 
 use napi_derive::napi;

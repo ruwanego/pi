@@ -25,6 +25,9 @@ export {
 	type FindToolDetails,
 	type FindToolInput,
 	type FindToolOptions,
+	type NativeFind,
+	type NativeFindRequest,
+	setNativeFind,
 } from "./find.ts";
 export {
 	createGrepTool,

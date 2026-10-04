@@ -15,3 +15,10 @@ The addon is loaded lazily on first call.
 
 `protocolCodec` is a Rust implementation of `@earendil-works/pi-protocol` CBOR and framing (`crates/pi-protocol`).
 Install it with `setNativeCodec(protocolCodec)` from `@earendil-works/pi-protocol`; it is not enabled by default.
+
+## Find
+
+`findFiles` is a Rust implementation of the `fd` search behind the coding-agent `find` tool (`crates/pi-find`). It uses
+fd's own matching and ignore crates and settings, and returns fd's output lines and error text. Install it with
+`setNativeFind(findFiles)` from `@earendil-works/pi-coding-agent`; it is not enabled by default. Unlike fd, results are
+always sorted (fd sorts only searches that finish within 100 ms).

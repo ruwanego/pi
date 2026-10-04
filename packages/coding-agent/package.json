@@ -54,6 +54,8 @@
 		"@earendil-works/pi-ai": "^0.99.2",
 		"@earendil-works/pi-codemode": "^0.99.2",
 		"@earendil-works/pi-mcp": "^0.99.2",
+		"@earendil-works/pi-native": "^0.99.2",
+		"@earendil-works/pi-protocol": "^0.99.2",
 		"@earendil-works/pi-tui": "^0.99.2",
 		"@silvia-odwyer/photon-node": "0.3.4",
 		"chalk": "6.0.0",
@@ -77,8 +79,6 @@
 	},
 	"devDependencies": {
 		"@earendil-works/pi-client": "^0.99.2",
-		"@earendil-works/pi-native": "^0.99.2",
-		"@earendil-works/pi-protocol": "^0.99.2",
 		"@earendil-works/pi-server": "^0.99.2",
 		"@types/cross-spawn": "6.0.6",
 		"@types/hosted-git-info": "3.0.5",

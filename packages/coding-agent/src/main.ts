@@ -49,6 +49,7 @@ import { resolveCliModel, resolveModelScope, type ScopedModel } from "./core/mod
 import { ModelRuntime } from "./core/model-runtime.ts";
 import { restoreStdout, takeOverStdout } from "./core/output-guard.ts";
 import { type AppMode, resolveProjectTrusted } from "./core/project-trust.ts";
+import { enableRustFeatures } from "./core/rust-features.ts";
 import type { CreateAgentSessionOptions } from "./core/sdk.ts";
 import {
 	formatMissingSessionCwdPrompt,
@@ -571,6 +572,14 @@ export async function main(args: string[], options?: MainOptions) {
 	if (offlineMode) {
 		process.env.PI_OFFLINE = "1";
 		process.env.PI_SKIP_VERSION_CHECK = "1";
+	}
+	if (isTruthyEnvFlag(process.env.PI_RUST)) {
+		try {
+			enableRustFeatures();
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			console.error(chalk.yellow(`Warning: PI_RUST is set but Rust features are unavailable: ${message}`));
+		}
 	}
 
 	if (await runAuthCommand(args)) {

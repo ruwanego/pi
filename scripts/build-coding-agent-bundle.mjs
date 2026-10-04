@@ -22,6 +22,8 @@ const allowedExternalPackages = new Set([
 	"@earendil-works/chord/delta",
 	"@earendil-works/chord/node",
 	"@silvia-odwyer/photon-node",
+	// Rust addon loader. Stays external so it resolves prebuilds/ relative to its own package.
+	"@earendil-works/pi-native",
 	"jiti",
 	// Optional native accelerators. Their callers fall back to JavaScript when absent.
 	"bufferutil",
@@ -86,7 +88,7 @@ function commonBuildOptions() {
 		banner,
 		bundle: true,
 		define: { PI_BUNDLED_NODE: "true" },
-		external: ["@earendil-works/chord", "@silvia-odwyer/photon-node"],
+		external: ["@earendil-works/chord", "@earendil-works/pi-native", "@silvia-odwyer/photon-node"],
 		format: "esm",
 		legalComments: "none",
 		logLevel: "warning",

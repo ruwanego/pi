@@ -22,3 +22,8 @@ Install it with `setNativeCodec(protocolCodec)` from `@earendil-works/pi-protoco
 fd's own matching and ignore crates and settings, and returns fd's output lines and error text. Install it with
 `setNativeFind(findFiles)` from `@earendil-works/pi-coding-agent`; it is not enabled by default. Unlike fd, results are
 always sorted (fd sorts only searches that finish within 100 ms).
+
+## Enable everything
+
+`PI_RUST=1 pi` switches every Rust implementation on at startup. From the SDK, call `enableRustFeatures()` from
+`@earendil-works/pi-coding-agent`; it throws without changing anything if the addon is not built.

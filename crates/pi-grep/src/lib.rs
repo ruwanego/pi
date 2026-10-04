@@ -7,8 +7,8 @@
 //! sniffing, memory maps only for an explicit file, ignore files (`.gitignore` inside git repositories, `.ignore`,
 //! `.rgignore`, git excludes), `--glob` rooted at the process working directory, and ripgrep's stderr messages.
 //!
-//! Differences: matching files are reported in path order (ripgrep reports them in completion order), and ripgrep
-//! configuration files (`RIPGREP_CONFIG_PATH`) are not read.
+//! Files are reported in the order their searches finish, as ripgrep prints them. ripgrep configuration files are
+//! not read: the grep tool keeps ripgrep when `RIPGREP_CONFIG_PATH` is set.
 
 use std::collections::HashSet;
 use std::io;
@@ -169,8 +169,8 @@ fn grep_with_budget(options: &GrepOptions, cancel: &AtomicBool, budget: usize) -
 	let limit_reached = options
 		.max_matches
 		.is_some_and(|max| state.count.load(Ordering::Relaxed) >= max);
-	let mut files = state.files.into_inner().expect("files lock");
-	files.sort_by(|a, b| a.0.cmp(&b.0));
+	// Files in the order their searches finished, which is the order ripgrep prints them.
+	let files = state.files.into_inner().expect("files lock");
 	let mut matches: Vec<GrepMatch> = files.into_iter().flat_map(|(_, matches)| matches).collect();
 	if let Some(max) = options.max_matches {
 		matches.truncate(max);
@@ -472,12 +472,15 @@ mod tests {
 	}
 
 	#[test]
-	fn reports_matching_lines_in_path_order() {
+	fn reports_matching_lines_per_file_in_line_order() {
 		let dir = TempDir::new("order");
 		dir.file("b.txt", b"one\nneedle two\n")
 			.file("a/c.txt", b"needle\nx\nneedle again\r\n");
+		// Files come in completion order like ripgrep; each file's lines stay in order.
+		let mut matches = run(&options(&dir.0, "needle"));
+		matches.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
 		assert_eq!(
-			run(&options(&dir.0, "needle")),
+			matches,
 			[
 				("a/c.txt".to_owned(), 1, "needle\n".to_owned()),
 				("a/c.txt".to_owned(), 3, "needle again\r\n".to_owned()),
@@ -568,7 +571,12 @@ mod tests {
 		let sequential = grep_with_budget(&opts, &cancel, usize::MAX).unwrap();
 		let parallel = grep_with_budget(&opts, &cancel, 0).unwrap();
 		assert_eq!(sequential.matches.len(), 200);
-		assert_eq!(sequential.matches, parallel.matches);
+		let key = |m: &GrepMatch| (m.path.clone(), m.line_number);
+		let mut sequential: Vec<_> = sequential.matches.iter().map(key).collect();
+		let mut parallel: Vec<_> = parallel.matches.iter().map(key).collect();
+		sequential.sort();
+		parallel.sort();
+		assert_eq!(sequential, parallel);
 	}
 
 	#[test]

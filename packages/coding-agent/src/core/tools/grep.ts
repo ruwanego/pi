@@ -109,7 +109,8 @@ let nativeGrep: NativeGrep | undefined;
 
 /**
  * Experimental: runs the default grep search through `grep` instead of the ripgrep binary, or back through ripgrep
- * when `undefined`. Custom `GrepOperations` still provide file access.
+ * when `undefined`. Custom `GrepOperations` still provide file access. ripgrep is still used while
+ * `RIPGREP_CONFIG_PATH` is set, because the native search does not read ripgrep configuration files.
  */
 export function setNativeGrep(grep: NativeGrep | undefined): void {
 	nativeGrep = grep;
@@ -169,8 +170,10 @@ export function createGrepToolDefinition(
 
 				(async () => {
 					try {
-						// Default implementation uses ripgrep, or the native replacement when one is installed.
-						const activeNativeGrep = nativeGrep;
+						// Default implementation uses ripgrep, or the native replacement when one is installed. ripgrep
+						// reads a configuration file when RIPGREP_CONFIG_PATH is non-empty; the native search does not, so
+						// keep ripgrep then.
+						const activeNativeGrep = process.env.RIPGREP_CONFIG_PATH ? undefined : nativeGrep;
 						const rgPath = activeNativeGrep ? undefined : await ensureTool("rg");
 						if (!activeNativeGrep && !rgPath) {
 							settle(() => reject(new Error("ripgrep (rg) is not available and could not be downloaded")));

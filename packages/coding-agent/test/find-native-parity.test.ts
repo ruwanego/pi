@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, sep } from "node:path";
+import { dirname, join } from "node:path";
 import { findFiles } from "@ruwanego/pi-native";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createFindToolDefinition, type FindToolInput, setNativeFind } from "../src/core/tools/find.ts";
@@ -25,9 +25,10 @@ async function runFind(root: string, params: FindToolInput, signal?: AbortSignal
 }
 
 /**
- * fd sorts its output only when the search finishes within 100 ms, which a loaded machine can exceed; the native
- * search always sorts. Sort result lines so the comparison is order-independent, and check that native output is
- * already sorted. Fixtures stay far below the output byte limit, so ordering cannot change which lines are kept.
+ * fd and the native search both sort only when the search finishes within 100 ms with at most 1000 results, and
+ * otherwise print results in the order they are found, which varies between runs. Sort result lines so the
+ * comparison is order-independent; crates/pi-find tests the ordering rule. Fixtures stay far below the output byte
+ * limit, so ordering cannot change which lines are kept.
  */
 function sortResultLines(outcome: Outcome): Outcome {
 	if (!outcome.ok) return outcome;
@@ -45,23 +46,7 @@ async function runBoth(root: string, params: FindToolInput): Promise<{ fd: Outco
 	} finally {
 		setNativeFind(undefined);
 	}
-	if (native.ok && !native.text.startsWith("No files found")) {
-		const paths = native.text.split("\n\n")[0].split("\n");
-		const absolute = paths.map((line) => join(root, params.path ?? ".", line));
-		expect(absolute).toEqual([...absolute].sort(comparePaths));
-	}
 	return { fd: sortResultLines(fd), native: sortResultLines(native) };
-}
-
-/** Rust's `Path` ordering: component by component, comparing bytes. */
-function comparePaths(a: string, b: string): number {
-	const left = a.split(sep).filter(Boolean);
-	const right = b.split(sep).filter(Boolean);
-	for (let i = 0; i < Math.min(left.length, right.length); i++) {
-		const order = Buffer.compare(Buffer.from(left[i]), Buffer.from(right[i]));
-		if (order !== 0) return order;
-	}
-	return left.length - right.length;
 }
 
 function write(root: string, relative: string, contents = ""): void {

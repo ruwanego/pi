@@ -799,6 +799,14 @@ thread_local! {
 	static JSON_PARSE: std::cell::Cell<Option<(sys::napi_env, sys::napi_ref)>> = const { std::cell::Cell::new(None) };
 }
 
+/// Captures the built-in `JSON.parse` when the addon is loaded, before extensions or user code run, so a later
+/// reassignment of the global cannot change what the native codec and streaming JSON parser return.
+#[napi(js_name = "captureBuiltins")]
+pub fn capture_builtins(env: Env) -> napi::Result<()> {
+	let js = Js { env: env.raw() };
+	json_parse(js).map(|_| ()).map_err(|failure| throw(js.env, failure))
+}
+
 pub(crate) fn json_parse(js: Js) -> Outcome<sys::napi_value> {
 	if let Some((env, reference)) = JSON_PARSE.get()
 		&& env == js.env

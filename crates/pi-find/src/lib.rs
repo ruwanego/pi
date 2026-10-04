@@ -6,13 +6,14 @@
 //! the global fd ignore file), output format (absolute path plus a trailing separator for directories) and error
 //! messages (fd's stderr). Matching logic follows fd 10 (`src/main.rs`, `src/walk.rs`, `src/regex_helper.rs`).
 //!
-//! One intentional difference: results are always sorted. fd sorts only when the search finishes within 100 ms,
-//! otherwise it streams results in walk order.
+//! Output order follows fd's receiver: sorted when the search ends (or reaches `--max-results`) within 100 ms with
+//! at most 1000 results, otherwise in the order results are found.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::time::{Duration, Instant};
 
 use etcetera::BaseStrategy;
 use globset::GlobBuilder;
@@ -60,10 +61,15 @@ struct Match {
 /// Runs the search and returns fd's output lines, sorted. Returns early with the matches found so far once
 /// `cancel` is set.
 pub fn find(options: &FindOptions, cancel: &AtomicBool) -> Result<Vec<String>, FindError> {
-	find_with_budget(options, cancel, SEQUENTIAL_BUDGET)
+	find_with_budget(options, cancel, SEQUENTIAL_BUDGET).map(|(lines, _)| lines)
 }
 
-fn find_with_budget(options: &FindOptions, cancel: &AtomicBool, budget: usize) -> Result<Vec<String>, FindError> {
+/// Returns the output lines and whether fd's buffering rule sorted them.
+fn find_with_budget(
+	options: &FindOptions,
+	cancel: &AtomicBool,
+	budget: usize,
+) -> Result<(Vec<String>, bool), FindError> {
 	let search_path = search_path(&options.search_path)?;
 	ensure_pattern_is_not_a_path(options)?;
 	let regex = build_regex(&options.pattern)?;
@@ -75,6 +81,8 @@ fn find_with_budget(options: &FindOptions, cancel: &AtomicBool, budget: usize) -
 		cancel,
 		matches: Mutex::new(Vec::new()),
 		done: AtomicBool::new(false),
+		started: Instant::now(),
+		order: AtomicU8::new(BUFFERING),
 	};
 
 	// Starting threads costs more than walking a small tree, so walk on this thread first and switch to the
@@ -103,16 +111,21 @@ fn find_with_budget(options: &FindOptions, cancel: &AtomicBool, budget: usize) -
 	}
 	if !finished {
 		search.matches.lock().expect("matches lock").clear();
+		search.order.store(BUFFERING, Ordering::Relaxed);
 		walker.threads(default_threads()).build_parallel().run(|| {
 			let search = &search;
 			Box::new(move |entry| search.visit(entry))
 		});
 	}
 
+	search.stop_buffering_at_deadline();
+	let sorted = search.order.load(Ordering::Relaxed) == SORTED;
 	let mut matches = search.matches.into_inner().expect("matches lock");
-	matches.sort_by(|a, b| a.path.cmp(&b.path));
+	if sorted {
+		matches.sort_by(|a, b| a.path.cmp(&b.path));
+	}
 	let separator = path_separator();
-	Ok(matches
+	let lines = matches
 		.into_iter()
 		.map(|entry| {
 			let mut line = entry.path.to_string_lossy().into_owned();
@@ -124,7 +137,8 @@ fn find_with_budget(options: &FindOptions, cancel: &AtomicBool, budget: usize) -
 			}
 			line
 		})
-		.collect())
+		.collect();
+	Ok((lines, sorted))
 }
 
 /// Search paths whose last search did not finish within the sequential budget. Later searches of the same path
@@ -164,7 +178,18 @@ struct Search<'a> {
 	cancel: &'a AtomicBool,
 	matches: Mutex<Vec<Match>>,
 	done: AtomicBool,
+	started: Instant,
+	/// fd's receiver mode: [`BUFFERING`], [`SORTED`] or [`STREAMED`].
+	order: AtomicU8,
 }
+
+/// fd buffers results and prints them sorted if the search ends, or reaches `--max-results`, within 100 ms with
+/// at most 1000 results buffered. Otherwise it switches to streaming and prints them in the order they arrive.
+const FD_MAX_BUFFER_TIME: Duration = Duration::from_millis(100);
+const FD_MAX_BUFFER_LENGTH: usize = 1000;
+const BUFFERING: u8 = 0;
+const SORTED: u8 = 1;
+const STREAMED: u8 = 2;
 
 impl Search<'_> {
 	/// fd's per-entry filter (`walk.rs`, `spawn_senders`) for the options the find tool uses.
@@ -202,11 +227,28 @@ impl Search<'_> {
 			return WalkState::Quit;
 		}
 		matches.push(Match { path, is_dir });
+		if matches.len() > FD_MAX_BUFFER_LENGTH {
+			self.stop_buffering(false);
+		}
 		if self.max_results.is_some_and(|max| matches.len() >= max) {
+			self.stop_buffering_at_deadline();
 			self.done.store(true, Ordering::Relaxed);
 			return WalkState::Quit;
 		}
 		WalkState::Continue
+	}
+
+	/// Leaves buffering mode once; later calls keep the first decision.
+	fn stop_buffering(&self, sorted: bool) {
+		let mode = if sorted { SORTED } else { STREAMED };
+		let _ = self
+			.order
+			.compare_exchange(BUFFERING, mode, Ordering::Relaxed, Ordering::Relaxed);
+	}
+
+	/// The search ended or reached `--max-results`: fd sorts if that happened before its buffering deadline.
+	fn stop_buffering_at_deadline(&self) {
+		self.stop_buffering(self.started.elapsed() <= FD_MAX_BUFFER_TIME);
 	}
 }
 
@@ -517,10 +559,36 @@ mod tests {
 			max_results: None,
 		};
 		let cancel = AtomicBool::new(false);
-		let sequential = find_with_budget(&options, &cancel, usize::MAX).unwrap();
-		let parallel = find_with_budget(&options, &cancel, 0).unwrap();
+		let (sequential, _) = find_with_budget(&options, &cancel, usize::MAX).unwrap();
+		let (mut parallel, _) = find_with_budget(&options, &cancel, 0).unwrap();
+		// The parallel walker's arrival order varies; fd's rule sorts this small, fast search anyway.
+		parallel.sort();
 		assert_eq!(sequential.len(), 20 * 5 * 2 + 20 * 5 + 20 + 1);
 		assert_eq!(sequential, parallel);
+	}
+
+	#[test]
+	fn output_order_follows_fd_buffering() {
+		let dir = TempDir::new("order");
+		for i in 0..1200 {
+			dir.file(&format!("f{i:04}.txt"), "");
+		}
+		let options = |max_results| FindOptions {
+			pattern: "*.txt".to_owned(),
+			search_path: dir.0.clone(),
+			full_path: false,
+			require_git: false,
+			max_results,
+		};
+		let cancel = AtomicBool::new(false);
+		// Up to 1000 results found quickly: sorted.
+		let (lines, sorted) = find_with_budget(&options(Some(1000)), &cancel, usize::MAX).unwrap();
+		assert!(sorted);
+		assert!(lines.is_sorted());
+		// More than 1000 results: fd streams them in arrival order.
+		let (lines, sorted) = find_with_budget(&options(None), &cancel, usize::MAX).unwrap();
+		assert!(!sorted);
+		assert_eq!(lines.len(), 1200);
 	}
 
 	#[test]

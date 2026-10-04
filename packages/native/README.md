@@ -20,15 +20,16 @@ Install it with `setNativeCodec(protocolCodec)` from `@earendil-works/pi-protoco
 
 `findFiles` is a Rust implementation of the `fd` search behind the coding-agent `find` tool (`crates/pi-find`). It uses
 fd's own matching and ignore crates and settings, and returns fd's output lines and error text. Install it with
-`setNativeFind(findFiles)` from `@earendil-works/pi-coding-agent`; it is not enabled by default. Unlike fd, results are
-always sorted (fd sorts only searches that finish within 100 ms).
+`setNativeFind(findFiles)` from `@earendil-works/pi-coding-agent`; it is not enabled by default. Like fd, results are
+sorted when the search ends within 100 ms with at most 1000 results, and otherwise come in discovery order.
 
 ## Grep
 
 `grepFiles` is a Rust implementation of the ripgrep search behind the coding-agent `grep` tool (`crates/pi-grep`). It
 uses ripgrep's own crates and settings and returns ripgrep's match messages, stderr text and error status. Install it
-with `setNativeGrep(grepFiles)` from `@earendil-works/pi-coding-agent`; it is not enabled by default. Unlike ripgrep,
-matching files are reported in path order, and ripgrep configuration files (`RIPGREP_CONFIG_PATH`) are not read.
+with `setNativeGrep(grepFiles)` from `@earendil-works/pi-coding-agent`; it is not enabled by default. Like ripgrep,
+matching files are reported in the order their searches finish. It does not read ripgrep configuration files, so the
+grep tool keeps ripgrep while `RIPGREP_CONFIG_PATH` is set.
 
 ## Streaming JSON
 

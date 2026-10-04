@@ -58,6 +58,7 @@ export interface NativeBinding {
 	NativeFindSearch: new (options: NativeFindOptions) => NativeFindSearchHandle;
 	NativeGrepSearch: new (options: NativeGrepOptions) => NativeGrepSearchHandle;
 	parseStreamingJsonFast(input: string): unknown;
+	captureBuiltins(): void;
 }
 
 const cjsRequire = createRequire(import.meta.url);
@@ -74,7 +75,10 @@ export function loadNative(): NativeBinding {
 	if (binding) return binding;
 	const modulePath = getNativeModulePath();
 	try {
-		binding = cjsRequire(modulePath) as NativeBinding;
+		const loaded = cjsRequire(modulePath) as NativeBinding;
+		// Capture built-ins such as JSON.parse now, before later code can replace them.
+		loaded.captureBuiltins();
+		binding = loaded;
 	} catch (error) {
 		throw new Error(`Failed to load pi-native from ${modulePath}. Run "npm run build" in packages/native.`, {
 			cause: error,

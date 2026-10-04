@@ -59,7 +59,7 @@
 			],
 			"behaviourChange": false,
 			"enabledByDefault": false,
-			"summary": "In-process Rust port of the fd search behind the find tool (ignore + globset, same settings, output and error text as fd) behind setNativeFind(findFiles). fd stays the default. Only difference: results are always sorted; fd sorts only searches that finish within 100 ms.",
+			"summary": "In-process Rust port of the fd search behind the find tool (ignore + globset, same settings, output and error text as fd) behind setNativeFind(findFiles); also enabled by PI_RUST=1. fd stays the default. Output order follows fd's buffering rule: sorted when the search ends within 100 ms with at most 1000 results, otherwise in discovery order. Only difference: fd does not need to be installed.",
 			"parity": "packages/coding-agent/test/find-native-parity.test.ts",
 			"benchmark": {
 				"note": "native/fd time ratio for one find tool call (pattern *.ts, limit 1000), median of 25 warm calls, linux-x64 (WSL2, 22 CPUs), Node 22.20, fd 10.5.0; lower is faster. Searches start on one thread and switch to the parallel walker after 500 entries; trees that needed it start parallel next time.",
@@ -85,7 +85,7 @@
 			],
 			"behaviourChange": false,
 			"enabledByDefault": false,
-			"summary": "In-process Rust port of the ripgrep search behind the grep tool (ignore + grep-regex + grep-searcher with ripgrep 15's configuration: matcher options, binary detection, BOM sniffing, mmap choice, ignore files, --glob root, stderr messages and exit status) behind setNativeGrep(grepFiles); also enabled by PI_RUST=1. ripgrep stays the default. Differences: matching files are reported in path order, and RIPGREP_CONFIG_PATH is not read.",
+			"summary": "In-process Rust port of the ripgrep search behind the grep tool (ignore + grep-regex + grep-searcher with ripgrep 15's configuration: matcher options, binary detection, BOM sniffing, mmap choice, ignore files, --glob root, stderr messages and exit status) behind setNativeGrep(grepFiles); also enabled by PI_RUST=1. ripgrep stays the default. Files are reported in completion order like ripgrep. While RIPGREP_CONFIG_PATH is set the tool keeps ripgrep, which reads that configuration. Only difference: ripgrep does not need to be installed.",
 			"parity": "packages/coding-agent/test/grep-native-parity.test.ts",
 			"benchmark": {
 				"note": "native/rg time ratio for one grep tool call (pattern export, limit 100), median of 25 warm calls, linux-x64 (WSL2, 22 CPUs), Node 22.20, ripgrep 15.2.0; lower is faster. Searches start on one thread and switch to the parallel walker after 250 entries; with context, the native search returns the context lines instead of the tool re-reading files.",

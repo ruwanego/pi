@@ -260,6 +260,27 @@ describe.skipIf(!rgPath)("grep: native search matches ripgrep", () => {
 		});
 	});
 
+	describe("ripgrep configuration file", () => {
+		it("uses ripgrep while RIPGREP_CONFIG_PATH is set", async () => {
+			const root = makeRoot("config");
+			write(root, "a.txt", "NEEDLE upper\nneedle lower\n");
+			const config = join(root, "..", `pi-rg-config-${process.pid}`);
+			writeFileSync(config, "--ignore-case\n");
+			const previous = process.env.RIPGREP_CONFIG_PATH;
+			process.env.RIPGREP_CONFIG_PATH = config;
+			try {
+				const { rg, native } = await runBoth(root, { pattern: "needle" });
+				// The configuration's --ignore-case applies, so both lines match.
+				expect(rg).toEqual({ ok: true, text: "a.txt:1: NEEDLE upper\na.txt:2: needle lower", details: undefined });
+				expect(native).toEqual(rg);
+			} finally {
+				if (previous === undefined) delete process.env.RIPGREP_CONFIG_PATH;
+				else process.env.RIPGREP_CONFIG_PATH = previous;
+				rmSync(config, { force: true });
+			}
+		});
+	});
+
 	describe("abort", () => {
 		it("rejects when aborted during the search", async () => {
 			const root = makeRoot("abort");

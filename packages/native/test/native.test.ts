@@ -129,3 +129,20 @@ describe("parseStreamingJsonFast", () => {
 		assert.strictEqual(parseStreamingJsonFast("12"), undefined);
 	});
 });
+
+describe("captured built-ins", () => {
+	it("keeps using the original JSON.parse after the global is replaced", () => {
+		const limits = { maxByteLength: 1024, maxContainerLength: 16, maxDepth: 8 };
+		const wire = protocolCodec.encodeCbor({ a: [1, "x"] }, limits);
+		const original = JSON.parse;
+		JSON.parse = () => {
+			throw new Error("replaced");
+		};
+		try {
+			assert.deepStrictEqual(protocolCodec.decodeCbor(wire, limits), { a: [1, "x"] });
+			assert.deepStrictEqual(parseStreamingJsonFast('{"a":"b'), { a: "b" });
+		} finally {
+			JSON.parse = original;
+		}
+	});
+});

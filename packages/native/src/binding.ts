@@ -58,6 +58,12 @@ export interface NativeBinding {
 	NativeFindSearch: new (options: NativeFindOptions) => NativeFindSearchHandle;
 	NativeGrepSearch: new (options: NativeGrepOptions) => NativeGrepSearchHandle;
 	parseStreamingJsonFast(input: string): unknown;
+	generateUnifiedPatch(path: string, oldContent: string, newContent: string, contextLines: number): string;
+	generateDiffString(
+		oldContent: string,
+		newContent: string,
+		contextLines: number,
+	): { diff: string; firstChangedLine: number | undefined };
 	captureBuiltins(): void;
 }
 

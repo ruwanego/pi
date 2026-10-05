@@ -4,6 +4,7 @@ mod find;
 mod grep;
 mod json;
 mod protocol;
+mod diff;
 
 use napi_derive::napi;
 

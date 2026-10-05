@@ -18,6 +18,7 @@ pi-find.workspace = true
 pi-grep.workspace = true
 pi-json.workspace = true
 pi-protocol.workspace = true
+similar = "2.5.0"
 
 [build-dependencies]
 napi-build.workspace = true

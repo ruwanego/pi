@@ -11,6 +11,7 @@ export {
 	type NativeGrepResult,
 	type NativeGrepSearchHandle,
 } from "./binding.ts";
+export { generateDiffString, generateUnifiedPatch } from "./diff.ts";
 export { findFiles } from "./find.ts";
 export { grepFiles } from "./grep.ts";
 export { parseStreamingJsonFast } from "./json.ts";

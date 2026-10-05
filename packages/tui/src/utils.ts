@@ -1115,13 +1115,8 @@ export function truncateToWidth(
 	ellipsis: string = "...",
 	pad: boolean = false,
 ): string {
-	if (maxWidth <= 0) {
-		return "";
-	}
-
-	if (text.length === 0) {
-		return pad ? " ".repeat(maxWidth) : "";
-	}
+	if (maxWidth <= 0) return "";
+	if (text.length === 0) return pad ? " ".repeat(maxWidth) : "";
 
 	const ellipsisWidth = visibleWidth(ellipsis);
 	if (ellipsisWidth >= maxWidth) {
@@ -1137,14 +1132,6 @@ export function truncateToWidth(
 		return finalizeTruncatedResult("", 0, clippedEllipsis.text, clippedEllipsis.width, maxWidth, pad);
 	}
 
-	if (isPrintableAscii(text)) {
-		if (text.length <= maxWidth) {
-			return pad ? text + " ".repeat(maxWidth - text.length) : text;
-		}
-		const targetWidth = maxWidth - ellipsisWidth;
-		return finalizeTruncatedResult(text.slice(0, targetWidth), targetWidth, ellipsis, ellipsisWidth, maxWidth, pad);
-	}
-
 	const targetWidth = maxWidth - ellipsisWidth;
 	let result = "";
 	let pendingAnsi = "";
@@ -1152,95 +1139,130 @@ export function truncateToWidth(
 	let keptWidth = 0;
 	let keepContiguousPrefix = true;
 	let overflowed = false;
-	let exhaustedInput = false;
-	const hasAnsi = text.includes("\x1b");
-	const hasTabs = text.includes("\t");
 
-	if (!hasAnsi && !hasTabs) {
-		for (const { segment } of graphemeSegmenter.segment(text)) {
-			const width = graphemeWidth(segment);
-			if (keepContiguousPrefix && keptWidth + width <= targetWidth) {
-				result += segment;
-				keptWidth += width;
-			} else {
-				keepContiguousPrefix = false;
+	let i = 0;
+	while (i < text.length) {
+		const code = text.charCodeAt(i);
+
+		// ASCII fast path
+		if (code >= 0x20 && code <= 0x7e) {
+			let end = i + 1;
+			while (end < text.length) {
+				const c = text.charCodeAt(end);
+				if (c < 0x20 || c > 0x7e) break;
+				end++;
 			}
-			visibleSoFar += width;
+
+			const asciiLen = end - i;
+			if (keepContiguousPrefix) {
+				const canKeep = targetWidth - keptWidth;
+				if (asciiLen <= canKeep) {
+					if (pendingAnsi) {
+						result += pendingAnsi;
+						pendingAnsi = "";
+					}
+					result += text.slice(i, end);
+					keptWidth += asciiLen;
+				} else {
+					if (canKeep > 0) {
+						if (pendingAnsi) {
+							result += pendingAnsi;
+							pendingAnsi = "";
+						}
+						result += text.slice(i, i + canKeep);
+						keptWidth += canKeep;
+					}
+					keepContiguousPrefix = false;
+					pendingAnsi = "";
+				}
+			}
+
+			visibleSoFar += asciiLen;
 			if (visibleSoFar > maxWidth) {
 				overflowed = true;
 				break;
 			}
+			i = end;
+			continue;
 		}
-		exhaustedInput = !overflowed;
-	} else {
-		let i = 0;
-		while (i < text.length) {
+
+		if (code === 0x1b) {
 			const ansi = extractAnsiCode(text, i);
 			if (ansi) {
 				pendingAnsi += ansi.code;
 				i += ansi.length;
 				continue;
 			}
+		}
 
-			if (text[i] === "\t") {
-				if (keepContiguousPrefix && keptWidth + 3 <= targetWidth) {
-					if (pendingAnsi) {
-						result += pendingAnsi;
-						pendingAnsi = "";
-					}
-					result += "\t";
-					keptWidth += 3;
-				} else {
-					keepContiguousPrefix = false;
+		if (code === 0x09) {
+			// Tab
+			if (keepContiguousPrefix && keptWidth + 3 <= targetWidth) {
+				if (pendingAnsi) {
+					result += pendingAnsi;
 					pendingAnsi = "";
 				}
-				visibleSoFar += 3;
-				if (visibleSoFar > maxWidth) {
-					overflowed = true;
-					break;
-				}
-				i++;
-				continue;
+				result += "\t";
+				keptWidth += 3;
+			} else {
+				keepContiguousPrefix = false;
+				pendingAnsi = "";
 			}
-
-			let end = i;
-			while (end < text.length && text[end] !== "\t") {
-				const nextAnsi = extractAnsiCode(text, end);
-				if (nextAnsi) {
-					break;
-				}
-				end++;
-			}
-
-			for (const { segment } of graphemeSegmenter.segment(text.slice(i, end))) {
-				const width = graphemeWidth(segment);
-				if (keepContiguousPrefix && keptWidth + width <= targetWidth) {
-					if (pendingAnsi) {
-						result += pendingAnsi;
-						pendingAnsi = "";
-					}
-					result += segment;
-					keptWidth += width;
-				} else {
-					keepContiguousPrefix = false;
-					pendingAnsi = "";
-				}
-
-				visibleSoFar += width;
-				if (visibleSoFar > maxWidth) {
-					overflowed = true;
-					break;
-				}
-			}
-			if (overflowed) {
+			visibleSoFar += 3;
+			if (visibleSoFar > maxWidth) {
+				overflowed = true;
 				break;
 			}
-			i = end;
+			i++;
+			continue;
 		}
-		exhaustedInput = i >= text.length;
+
+		// Complex text (Unicode/Emoji)
+		let end = i + 1;
+		while (end < text.length) {
+			const c = text.charCodeAt(end);
+			if ((c >= 0x20 && c <= 0x7e) || c === 0x1b || c === 0x09) break;
+			end++;
+		}
+
+		// Clamp the complex chunk parsing so we don't segment megabytes
+		// of text just to figure out the next few visual columns.
+		const remaining = maxWidth - visibleSoFar;
+		if (remaining < end - i && end - i > 100) {
+			const safeBound = i + remaining * 2 + 32;
+			if (safeBound < end) {
+				end = safeBound;
+			}
+		}
+
+		for (const { segment } of graphemeSegmenter.segment(text.slice(i, end))) {
+			const width = graphemeWidth(segment);
+			if (keepContiguousPrefix && keptWidth + width <= targetWidth) {
+				if (pendingAnsi) {
+					result += pendingAnsi;
+					pendingAnsi = "";
+				}
+				result += segment;
+				keptWidth += width;
+			} else {
+				keepContiguousPrefix = false;
+				pendingAnsi = "";
+			}
+
+			visibleSoFar += width;
+			if (visibleSoFar > maxWidth) {
+				overflowed = true;
+				break;
+			}
+		}
+		if (overflowed) {
+			break;
+		}
+		i = end;
 	}
 
-	if (!overflowed && exhaustedInput) {
+	const exhaustedInput = i >= text.length && !overflowed;
+	if (exhaustedInput) {
 		return pad ? text + " ".repeat(Math.max(0, maxWidth - visibleSoFar)) : text;
 	}
 

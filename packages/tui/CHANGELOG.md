@@ -4,7 +4,11 @@
 
 ## [0.99.1] - 2026-09-29
 
-## [0.99.0] - 2026-09-29
+## [Unreleased]
+
+### Changed
+
+- Significantly improved `truncateToWidth` performance by avoiding full-string Unicode segmentation and ANSI parsing scans when truncating long lines.
 
 ### Breaking Changes
 

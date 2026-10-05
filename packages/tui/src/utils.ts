@@ -125,14 +125,9 @@ function truncateFragmentToWidth(text: string, maxWidth: number): { text: string
 			continue;
 		}
 
-		let end = i;
-		while (end < text.length && text[end] !== "\t") {
-			const nextAnsi = extractAnsiCode(text, end);
-			if (nextAnsi) {
-				break;
-			}
-			end++;
-		}
+		const nextTab = text.indexOf("\t", i);
+		const boundary = findChunkBoundary(text, i);
+		const end = nextTab === -1 ? boundary : Math.min(nextTab, boundary);
 
 		for (const { segment } of graphemeSegmenter.segment(text.slice(i, end))) {
 			const w = graphemeWidth(segment);
@@ -341,8 +336,7 @@ export function getGraphemeCellRange(line: string, column: number): GraphemeCell
 			i += ansi.length;
 			continue;
 		}
-		let textEnd = i;
-		while (textEnd < line.length && !extractAnsiCode(line, textEnd)) textEnd++;
+		const textEnd = findChunkBoundary(line, i);
 		for (const { segment } of graphemeSegmenter.segment(line.slice(i, textEnd))) {
 			const width = graphemeWidth(segment);
 			if (width > 0 && column >= currentCol && column < currentCol + width) {
@@ -368,8 +362,7 @@ export function getOsc8LinkAtColumn(line: string, column: number): string | unde
 			i += ansi.length;
 			continue;
 		}
-		let textEnd = i;
-		while (textEnd < line.length && !extractAnsiCode(line, textEnd)) textEnd++;
+		const textEnd = findChunkBoundary(line, i);
 		for (const { segment } of graphemeSegmenter.segment(line.slice(i, textEnd))) {
 			const width = segment === "\t" ? 3 : graphemeWidth(segment);
 			if (column >= currentCol && column < currentCol + width) return activeUrl;
@@ -479,6 +472,27 @@ function ansiCodeLength(str: string, pos: number): number {
 	}
 
 	return 0;
+}
+
+function findNextAnsiCode(str: string, pos: number): number {
+	let searchPos = pos;
+	while (searchPos < str.length) {
+		const nextAnsi = str.indexOf("\x1b", searchPos);
+		if (nextAnsi === -1) return str.length;
+		if (ansiCodeLength(str, nextAnsi) > 0) return nextAnsi;
+		searchPos = nextAnsi + 1;
+	}
+	return str.length;
+}
+
+function findChunkBoundary(str: string, pos: number, maxChunkSize = 2048): number {
+	const nextAnsi = findNextAnsiCode(str, pos);
+	if (nextAnsi - pos <= maxChunkSize) return nextAnsi;
+	let end = pos + maxChunkSize;
+	if (end < str.length && str.charCodeAt(end - 1) >= 0xd800 && str.charCodeAt(end - 1) <= 0xdbff) {
+		end++;
+	}
+	return end;
 }
 
 type Osc8Terminator = "\x07" | "\x1b\\";
@@ -1301,8 +1315,7 @@ export function sliceWithWidth(
 			continue;
 		}
 
-		let textEnd = i;
-		while (textEnd < line.length && !extractAnsiCode(line, textEnd)) textEnd++;
+		const textEnd = findChunkBoundary(line, i);
 
 		for (const { segment } of graphemeSegmenter.segment(line.slice(i, textEnd))) {
 			const w = graphemeWidth(segment);
@@ -1369,8 +1382,7 @@ export function extractSegments(
 			continue;
 		}
 
-		let textEnd = i;
-		while (textEnd < line.length && !extractAnsiCode(line, textEnd)) textEnd++;
+		const textEnd = findChunkBoundary(line, i);
 
 		for (const { segment } of graphemeSegmenter.segment(line.slice(i, textEnd))) {
 			const w = graphemeWidth(segment);

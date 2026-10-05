@@ -40,11 +40,12 @@ import type {
 import { appendAssistantMessageDiagnostic } from "../utils/diagnostics.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { headersToRecord } from "../utils/headers.ts";
-import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
+import { parseJsonWithRepair } from "../utils/json-parse.ts";
 import { getPiUserAgent } from "../utils/pi-user-agent.ts";
 import { getProviderEnvValue } from "../utils/provider-env.ts";
 import { retryProviderRequest } from "../utils/provider-retry.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
+import { StreamingJsonParser } from "../utils/streaming-json-parser.ts";
 import { getSystemMessageText, renderSystemMessageUpdate } from "../utils/text.ts";
 import {
 	getCurrentTools,
@@ -766,7 +767,10 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 						const block = blocks[index];
 						if (block && block.type === "toolCall") {
 							block.partialJson += event.delta.partial_json;
-							block.arguments = parseStreamingJson(block.partialJson);
+							if (!(block as any).parser) (block as any).parser = new StreamingJsonParser();
+							const parser = (block as any).parser as StreamingJsonParser;
+							parser.append(event.delta.partial_json);
+							block.arguments = parser.parsed;
 							stream.push({
 								type: "toolcall_delta",
 								contentIndex: index,
@@ -802,7 +806,10 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 								partial: output,
 							});
 						} else if (block.type === "toolCall") {
-							block.arguments = parseStreamingJson(block.partialJson);
+							if ((block as any).parser) {
+								block.arguments = (block as any).parser.parsed;
+								delete (block as any).parser;
+							}
 							// Finalize in-place and strip the scratch buffer so replay only
 							// carries parsed arguments.
 							delete (block as { partialJson?: string }).partialJson;

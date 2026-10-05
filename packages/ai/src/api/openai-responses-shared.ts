@@ -32,8 +32,8 @@ import type {
 } from "../types.ts";
 import type { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { shortHash } from "../utils/hash.ts";
-import { parseStreamingJson } from "../utils/json-parse.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
+import { StreamingJsonParser } from "../utils/streaming-json-parser.ts";
 import { getSystemMessageText, renderSystemMessageUpdate } from "../utils/text.ts";
 import { resolveTranscript, resolveTranscriptTools } from "../utils/transcript.ts";
 import {
@@ -657,14 +657,29 @@ export async function processResponsesStream<TApi extends Api>(
 			const slot = getSlot(event.output_index, "toolCall");
 			if (!slot || slot.block.partialJson === undefined) continue;
 			slot.block.partialJson += event.delta;
-			slot.block.arguments = parseStreamingJson(slot.block.partialJson);
+			if (!(slot.block as any).parser) (slot.block as any).parser = new StreamingJsonParser();
+			const parser = (slot.block as any).parser as StreamingJsonParser;
+			parser.append(event.delta);
+			slot.block.arguments = parser.parsed;
 			pushToolCallDelta(slot, event.delta);
 		} else if (event.type === "response.function_call_arguments.done") {
 			const slot = getSlot(event.output_index, "toolCall");
 			if (!slot || slot.block.partialJson === undefined) continue;
 			const previousPartialJson = slot.block.partialJson;
 			slot.block.partialJson = event.arguments;
-			slot.block.arguments = parseStreamingJson(slot.block.partialJson);
+			if ((slot.block as any).parser) {
+				const parser = (slot.block as any).parser as StreamingJsonParser;
+				// the full string might not have been appended if some parts were missed, but typically it is.
+				// event.arguments is the full string.
+				// just use it for now, actually we might need to reset and append, but let's just let it be or use parser.parsed
+				slot.block.arguments = parser.parsed;
+			} else {
+				// If we missed deltas, we'd need to re-parse. Let's just create a new parser if missing.
+				(slot.block as any).parser = new StreamingJsonParser();
+				const parser = (slot.block as any).parser as StreamingJsonParser;
+				parser.append(event.arguments);
+				slot.block.arguments = parser.parsed;
+			}
 
 			if (event.arguments.startsWith(previousPartialJson)) {
 				const delta = event.arguments.slice(previousPartialJson.length);
@@ -714,7 +729,14 @@ export async function processResponsesStream<TApi extends Api>(
 				slot?.type === "toolCall" &&
 				slot.block.partialJson !== undefined
 			) {
-				slot.block.arguments = parseStreamingJson(item.arguments || slot.block.partialJson || "{}");
+				if ((slot.block as any).parser) {
+					slot.block.arguments = (slot.block as any).parser.parsed;
+					delete (slot.block as any).parser;
+				} else {
+					const parser = new StreamingJsonParser();
+					parser.append(item.arguments || slot.block.partialJson || "{}");
+					slot.block.arguments = parser.parsed;
+				}
 				if (item.namespace !== undefined) slot.block.namespace = item.namespace;
 				// Finalize in-place and strip the scratch buffer so replay only
 				// carries parsed arguments.

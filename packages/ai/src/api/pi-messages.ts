@@ -27,8 +27,8 @@ import type {
 import { appendAssistantMessageDiagnostic, createAssistantMessageDiagnostic } from "../utils/diagnostics.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { headersToRecord, providerHeadersToRecord } from "../utils/headers.ts";
-import { parseStreamingJson } from "../utils/json-parse.ts";
 import { getProviderEnvValue } from "../utils/provider-env.ts";
+import { StreamingJsonParser } from "../utils/streaming-json-parser.ts";
 
 export interface PiMessagesOptions extends StreamOptions {
 	reasoning?: ThinkingLevel;
@@ -188,7 +188,7 @@ function createEventConverter(model: Model<"pi-messages">) {
 		stopReason: "pending",
 		timestamp: Date.now(),
 	};
-	const toolJson = new Map<number, string>();
+	const toolParsers = new Map<number, StreamingJsonParser<ToolCall["arguments"]>>();
 
 	return (event: PiMessagesEvent): AssistantMessageEvent => {
 		switch (event.type) {
@@ -249,18 +249,19 @@ function createEventConverter(model: Model<"pi-messages">) {
 					name: event.toolName,
 					arguments: {},
 				};
-				toolJson.set(event.contentIndex, "");
+				toolParsers.set(event.contentIndex, new StreamingJsonParser<ToolCall["arguments"]>());
 				break;
 			case "toolcall_delta": {
-				const json = `${toolJson.get(event.contentIndex) ?? ""}${event.delta}`;
-				toolJson.set(event.contentIndex, json);
-				(partial.content[event.contentIndex] as ToolCall).arguments =
-					parseStreamingJson<ToolCall["arguments"]>(json);
+				const parser = toolParsers.get(event.contentIndex);
+				if (parser) {
+					parser.append(event.delta);
+					(partial.content[event.contentIndex] as ToolCall).arguments = parser.parsed;
+				}
 				break;
 			}
 			case "toolcall_end":
 				Object.assign(partial.content[event.contentIndex]!, event.toolCall);
-				toolJson.delete(event.contentIndex);
+				toolParsers.delete(event.contentIndex);
 				return {
 					type: "toolcall_end",
 					contentIndex: event.contentIndex,

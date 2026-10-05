@@ -16,9 +16,9 @@ import type {
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { shortHash } from "../utils/hash.ts";
 import { headersToRecord } from "../utils/headers.ts";
-import { parseStreamingJson } from "../utils/json-parse.ts";
 import { getPiUserAgent } from "../utils/pi-user-agent.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
+import { StreamingJsonParser } from "../utils/streaming-json-parser.ts";
 import { getSystemMessageText, renderSystemMessageUpdate } from "../utils/text.ts";
 import { getCurrentTools, resolveTranscript } from "../utils/transcript.ts";
 import { getJsonSchemaToolParameters, resolveJsonSchemaStrictSampling } from "./constrained-sampling.ts";
@@ -732,7 +732,10 @@ async function consumeChatStream(
 					? toolCall.function.arguments
 					: JSON.stringify(toolCall.function.arguments || {});
 			block.partialArgs = (block.partialArgs || "") + argsDelta;
-			block.arguments = parseStreamingJson<ToolCall["arguments"]>(block.partialArgs);
+			if (!(block as any).parser) (block as any).parser = new StreamingJsonParser<ToolCall["arguments"]>();
+			const parser = (block as any).parser as StreamingJsonParser<ToolCall["arguments"]>;
+			parser.append(argsDelta);
+			block.arguments = parser.parsed;
 			stream.push({
 				type: "toolcall_delta",
 				contentIndex: toolBlocksByKey.get(key)!,
@@ -747,7 +750,10 @@ async function consumeChatStream(
 		const block = output.content[index];
 		if (block.type !== "toolCall") continue;
 		const toolBlock = block as ToolCall & { partialArgs?: string };
-		toolBlock.arguments = parseStreamingJson<ToolCall["arguments"]>(toolBlock.partialArgs);
+		if ((toolBlock as any).parser) {
+			toolBlock.arguments = (toolBlock as any).parser.parsed;
+			delete (toolBlock as any).parser;
+		}
 		// Finalize in-place and strip the scratch buffer so replay only
 		// carries parsed arguments.
 		delete toolBlock.partialArgs;

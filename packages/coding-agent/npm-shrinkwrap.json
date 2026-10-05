@@ -1958,7 +1958,8 @@
 			},
 			"engines": {
 				"node": ">=10.0.0"
-			}
+			},
+			"peer": true
 		},
 		"node_modules/yaml": {
 			"version": "2.9.0",

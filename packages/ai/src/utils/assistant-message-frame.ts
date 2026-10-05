@@ -1,5 +1,5 @@
 import type { AssistantMessage, AssistantMessageEvent, TextContent, ThinkingContent, ToolCall } from "../types.ts";
-import { parseStreamingJson } from "./json-parse.ts";
+import { StreamingJsonParser } from "./streaming-json-parser.ts";
 
 /**
  * Compact, replayable assistant-message progress. Terminal settlement is
@@ -112,7 +112,7 @@ function serializedArguments(argumentsValue: ToolCall["arguments"]): string {
 	return serialized;
 }
 
-const EMPTY_PARSED_TOOL_ARGUMENTS = serializedArguments(parseStreamingJson<ToolCall["arguments"]>(""));
+const EMPTY_PARSED_TOOL_ARGUMENTS = serializedArguments(new StreamingJsonParser<ToolCall["arguments"]>().parsed);
 
 function isJsonPrefix(snapshot: unknown, current: unknown): boolean {
 	if (typeof snapshot === "string") return typeof current === "string" && current.startsWith(snapshot);
@@ -244,12 +244,16 @@ export class AssistantMessageFrameEncoder {
 						: { type: "toolcall_delta", contentIndex: event.contentIndex, delta: event.delta };
 				}
 				state.catchupJson += event.delta;
-				const argumentsValue = parseStreamingJson<ToolCall["arguments"]>(state.catchupJson);
+				const parser1 = new StreamingJsonParser<ToolCall["arguments"]>();
+				parser1.append(state.catchupJson);
+				const argumentsValue = parser1.parsed;
 				if (serializedArguments(argumentsValue) !== state.snapshotArguments) {
 					// Legacy grammar calls include the initial input in toolcall_start, but their
 					// JSON delta stream still begins at an empty input. Its parsed arguments can
 					// therefore extend, rather than exactly reproduce, the start snapshot.
-					const snapshotArguments = parseStreamingJson<ToolCall["arguments"]>(state.snapshotArguments);
+					const parser2 = new StreamingJsonParser<ToolCall["arguments"]>();
+					parser2.append(state.snapshotArguments);
+					const snapshotArguments = parser2.parsed;
 					if (!isJsonPrefix(snapshotArguments, argumentsValue)) return undefined;
 				}
 				state.caughtUp = true;
@@ -451,7 +455,9 @@ export function reduceAssistantMessageFrames(frames: Iterable<AssistantMessageFr
 					throw new Error("Unreachable tool-call checkpoint state");
 				}
 				state.json = frame.json;
-				block.arguments = parseStreamingJson<ToolCall["arguments"]>(frame.json);
+				const parser = new StreamingJsonParser<ToolCall["arguments"]>();
+				parser.append(frame.json);
+				block.arguments = parser.parsed;
 				break;
 			}
 			case "toolcall_delta": {
@@ -483,7 +489,9 @@ export function reduceAssistantMessageFrames(frames: Iterable<AssistantMessageFr
 		if (state.kind !== "toolCall" || state.ended || state.json.length === 0) continue;
 		const block = message.content[contentIndex];
 		if (block?.type !== "toolCall") throw new Error("Unreachable tool-call frame state");
-		block.arguments = parseStreamingJson<ToolCall["arguments"]>(state.json);
+		const parser = new StreamingJsonParser<ToolCall["arguments"]>();
+		parser.append(state.json);
+		block.arguments = parser.parsed;
 	}
 
 	return message;

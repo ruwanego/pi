@@ -49,7 +49,10 @@ export class JsonlSessionRepo
 	private readonly fileSystem: FileSystem;
 	private readonly sessionsRootInput: string;
 	private readonly now: () => number;
-	private readonly openSessions = new Map<string, JsonlStorage>();
+	private readonly openSessions = new Map<
+		string,
+		{ storage: JsonlStorage; session: StorageBackedSession<JsonlSessionMetadata> }
+	>();
 	private readonly pendingCreates = new Set<string>();
 	private closed = false;
 	private closePromise: Promise<void> | undefined;
@@ -158,7 +161,7 @@ export class JsonlSessionRepo
 		}
 		this.pendingCreates.add(destinationKey);
 
-		const sourceStorage = this.openSessions.get(this.sessionKey(source.cwd, source.id));
+		const sourceStorage = this.openSessions.get(this.sessionKey(source.cwd, source.id))?.storage;
 		let path: string | undefined;
 		let storage: JsonlStorage | undefined;
 		try {
@@ -195,11 +198,11 @@ export class JsonlSessionRepo
 		}
 	}
 
-	close(_context: Context): Promise<void> {
+	close(context: Context): Promise<void> {
 		if (this.closePromise !== undefined) return this.closePromise;
 		this.closed = true;
-		// TODO: Define ownership semantics before deciding whether repository close should close session handles.
-		this.closePromise = Promise.resolve();
+		const promises = Array.from(this.openSessions.values()).map(({ session }) => session.close(context));
+		this.closePromise = Promise.all(promises).then(() => undefined);
 		return this.closePromise;
 	}
 
@@ -338,10 +341,10 @@ export class JsonlSessionRepo
 		if (this.openSessions.has(key)) throw new Error(`Session is already open: ${metadata.id}`);
 		const session = new StorageBackedSession(metadata, storage, {
 			onClose: () => {
-				if (this.openSessions.get(key) === storage) this.openSessions.delete(key);
+				if (this.openSessions.get(key)?.storage === storage) this.openSessions.delete(key);
 			},
 		});
-		this.openSessions.set(key, storage);
+		this.openSessions.set(key, { storage, session });
 		return session;
 	}
 

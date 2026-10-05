@@ -205,6 +205,11 @@ export interface AppliedEditsResult {
  * Unicode quotes/dashes normalized to ASCII).
  */
 export function fuzzyFindText(content: string, oldText: string): FuzzyMatchResult {
+	return findText(content, oldText);
+}
+
+/** Match against an optional reusable fuzzy-normalized view of content. */
+function findText(content: string, oldText: string, fuzzyContent?: string): FuzzyMatchResult {
 	// Try exact match first
 	const exactIndex = content.indexOf(oldText);
 	if (exactIndex !== -1) {
@@ -218,7 +223,7 @@ export function fuzzyFindText(content: string, oldText: string): FuzzyMatchResul
 	}
 
 	// Try fuzzy match - work entirely in normalized space
-	const fuzzyContent = normalizeForFuzzyMatch(content);
+	fuzzyContent ??= normalizeForFuzzyMatch(content);
 	const fuzzyOldText = normalizeForFuzzyMatch(oldText);
 	const fuzzyIndex = fuzzyContent.indexOf(fuzzyOldText);
 
@@ -242,12 +247,6 @@ export function fuzzyFindText(content: string, oldText: string): FuzzyMatchResul
 		usedFuzzyMatch: true,
 		contentForReplacement: fuzzyContent,
 	};
-}
-
-function countOccurrences(content: string, oldText: string): number {
-	const fuzzyContent = normalizeForFuzzyMatch(content);
-	const fuzzyOldText = normalizeForFuzzyMatch(oldText);
-	return fuzzyContent.split(fuzzyOldText).length - 1;
 }
 
 function getNotFoundError(path: string, editIndex: number, totalEdits: number): Error {
@@ -313,19 +312,26 @@ export function applyEditsToNormalizedContent(
 		}
 	}
 
-	const initialMatches = normalizedEdits.map((edit) => fuzzyFindText(normalizedContent, edit.oldText));
+	// All edits inspect the same source. Reuse its normalized view for matching
+	// and duplicate detection instead of normalizing the whole file per edit.
+	const fuzzyContent = normalizeForFuzzyMatch(normalizedContent);
+	const initialMatches = normalizedEdits.map((edit) => findText(normalizedContent, edit.oldText, fuzzyContent));
 	const usedFuzzyMatch = initialMatches.some((match) => match.usedFuzzyMatch);
-	const replacementBaseContent = usedFuzzyMatch ? normalizeForFuzzyMatch(normalizedContent) : normalizedContent;
+	const replacementBaseContent = usedFuzzyMatch ? fuzzyContent : normalizedContent;
+	// Preserve the second normalization used when matching in fuzzy space.
+	const fuzzyReplacementBaseContent = usedFuzzyMatch ? normalizeForFuzzyMatch(fuzzyContent) : fuzzyContent;
 
 	const matchedEdits: MatchedEdit[] = [];
 	for (let i = 0; i < normalizedEdits.length; i++) {
 		const edit = normalizedEdits[i];
-		const matchResult = fuzzyFindText(replacementBaseContent, edit.oldText);
+		const matchResult = usedFuzzyMatch
+			? findText(replacementBaseContent, edit.oldText, fuzzyReplacementBaseContent)
+			: initialMatches[i];
 		if (!matchResult.found) {
 			throw getNotFoundError(path, i, normalizedEdits.length);
 		}
 
-		const occurrences = countOccurrences(replacementBaseContent, edit.oldText);
+		const occurrences = fuzzyReplacementBaseContent.split(normalizeForFuzzyMatch(edit.oldText)).length - 1;
 		if (occurrences > 1) {
 			throw getDuplicateError(path, i, normalizedEdits.length, occurrences);
 		}

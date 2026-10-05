@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Reuse normalized file content across batch edits to reduce matching and preview time while preserving matching, duplicate detection, and unchanged bytes.
+
 ### Added
 
 - Experimental `setNativeFind()` hook that runs the default `find` tool search through an alternative to the fd binary, such as `findFiles` from `@ruwanego/pi-native` (Rust). fd remains the default.

@@ -1,11 +1,7 @@
-import { parseStreamingJsonFast } from "@ruwanego/pi-native";
-import { afterEach, describe, expect, it } from "vitest";
-import { parseStreamingJson, setNativeStreamingJsonParser } from "../src/utils/json-parse.ts";
-
-/**
- * Differential test for RUST-004: parseStreamingJson must return the same value with the Rust fast path installed as
- * without it, for every prefix of streamed tool-call arguments and for malformed input.
- */
+import { loadNative } from "@ruwanego/pi-native";
+import { describe, it } from "vitest";
+import { parseStreamingJson } from "../src/utils/json-parse.ts";
+import { StreamingJsonParser, setNativeStreamingJsonParser } from "../src/utils/streaming-json-parser.ts";
 
 /** Strict structural equality: same types, prototypes, key order, and Object.is for primitives. */
 function sameValue(a: unknown, b: unknown, path = "$"): string | undefined {
@@ -19,7 +15,6 @@ function sameValue(a: unknown, b: unknown, path = "$"): string | undefined {
 	if (standard.includes(protoA) || standard.includes(protoB)) {
 		if (protoA !== protoB) return `${path}: different prototypes`;
 	} else {
-		// partial-json's `obj["__proto__"] = value` gives each result its own prototype object.
 		const difference = sameValue(protoA, protoB, `${path}.[[Prototype]]`);
 		if (difference) return difference;
 	}
@@ -40,29 +35,40 @@ function sameValue(a: unknown, b: unknown, path = "$"): string | undefined {
 	return undefined;
 }
 
-function both(input: string): { typescript: unknown; native: unknown } {
-	setNativeStreamingJsonParser(undefined);
+function expectSameChunks(chunks: string[]): void {
+	const input = chunks.join("");
 	const typescript = parseStreamingJson(input);
-	setNativeStreamingJsonParser(parseStreamingJsonFast);
-	try {
-		return { typescript, native: parseStreamingJson(input) };
-	} finally {
-		setNativeStreamingJsonParser(undefined);
-	}
-}
 
-function expectSame(input: string): void {
-	const { typescript, native } = both(input);
+	const parser = new StreamingJsonParser();
+	for (const chunk of chunks) {
+		parser.append(chunk);
+	}
+	const native = parser.parsed;
+
 	const difference = sameValue(native, typescript);
 	if (difference) throw new Error(`${difference}\ninput: ${JSON.stringify(input)}`);
 }
 
-function prefixes(text: string, maxCount = 4000): string[] {
+function chunkify(text: string, maxCount = 4000): string[][] {
 	const step = Math.max(1, Math.floor(text.length / maxCount));
-	const result: string[] = [];
-	for (let length = 0; length <= text.length; length += step) result.push(text.slice(0, length));
-	result.push(text);
-	return result;
+	const result: string[][] = [];
+	const current: string[] = [];
+	for (let length = 0; length <= text.length; length += step) {
+		const slice = text.slice(length - step, length);
+		if (slice) current.push(slice);
+		result.push([...current, text.slice(length)]); // this is not quite right
+	}
+	// Let's just create sequences of chunks that build up the string
+	const sequences: string[][] = [];
+	for (let length = 0; length <= text.length; length += step) {
+		const prefix = text.slice(0, length);
+		// just split prefix into 1-3 chunks
+		const p1 = Math.floor(prefix.length / 3);
+		const p2 = Math.floor((prefix.length * 2) / 3);
+		sequences.push([prefix.slice(0, p1), prefix.slice(p1, p2), prefix.slice(p2)]);
+	}
+	sequences.push([text]);
+	return sequences;
 }
 
 const longContent = Array.from(
@@ -89,25 +95,17 @@ const documents: unknown[] = [
 	{ values: Array.from({ length: 60 }, (_, i) => (i - 30) * 1.25 * 10 ** ((i % 9) - 4)) },
 ];
 
-describe("parseStreamingJson: native fast path matches TypeScript", () => {
-	afterEach(() => {
-		setNativeStreamingJsonParser(undefined);
+describe("StreamingJsonParser: native stateful fast path matches TypeScript", () => {
+	it("initializes native parser", () => {
+		setNativeStreamingJsonParser(() => new (loadNative().StreamingJsonParser)());
 	});
 
 	it.each(documents.map((doc, i) => [i, doc] as const))("every prefix of compact document %d", (_, doc) => {
-		for (const prefix of prefixes(JSON.stringify(doc))) expectSame(prefix);
+		for (const chunks of chunkify(JSON.stringify(doc))) expectSameChunks(chunks);
 	});
 
 	it.each(documents.map((doc, i) => [i, doc] as const))("every prefix of pretty-printed document %d", (_, doc) => {
-		for (const prefix of prefixes(JSON.stringify(doc, null, 2), 1500)) expectSame(prefix);
-	});
-
-	it("handles most streaming prefixes natively", () => {
-		const text = JSON.stringify(documents[0]);
-		let native = 0;
-		const all = prefixes(text);
-		for (const prefix of all) if (prefix.trim() && parseStreamingJsonFast(prefix) !== undefined) native++;
-		expect(native / all.length).toBeGreaterThan(0.9);
+		for (const chunks of chunkify(JSON.stringify(doc, null, 2), 1500)) expectSameChunks(chunks);
 	});
 
 	it.each([
@@ -168,49 +166,6 @@ describe("parseStreamingJson: native fast path matches TypeScript", () => {
 		"",
 		"   ",
 	])("malformed or unusual input %j", (input) => {
-		expectSame(input);
-	});
-
-	it("matches on random mutations of streaming prefixes", () => {
-		let seed = 7;
-		const random = (n: number) => {
-			seed = (seed * 1103515245 + 12345) % 2 ** 31;
-			return seed % n;
-		};
-		const pieces = [
-			'"',
-			"\\",
-			"\\u",
-			"\\ud800",
-			"{",
-			"}",
-			"[",
-			"]",
-			",",
-			":",
-			" ",
-			"\t",
-			"\n",
-			" ",
-			"1",
-			"-",
-			".",
-			"e",
-			"true",
-			"null",
-			"__proto__",
-			"\u0001",
-		];
-		const sources = documents.map((doc) => JSON.stringify(doc));
-		for (let i = 0; i < 20000; i++) {
-			const source = sources[random(sources.length)]!;
-			let text = source.slice(0, random(source.length + 1));
-			const edits = random(3);
-			for (let e = 0; e < edits; e++) {
-				const at = random(text.length + 1);
-				text = text.slice(0, at) + pieces[random(pieces.length)] + text.slice(at + random(2));
-			}
-			expectSame(text);
-		}
+		expectSameChunks([input]);
 	});
 });

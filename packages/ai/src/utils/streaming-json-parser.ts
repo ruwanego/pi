@@ -1,300 +1,100 @@
-type StackItem = { type: "object"; obj: any; key: string | null } | { type: "array"; arr: any[] };
+import { parseStreamingJson } from "./json-parse.ts";
 
-type State = number;
-const State = {
-	EXPECT_VALUE: 0,
-	EXPECT_OBJ_KEY: 1,
-	EXPECT_COLON: 2,
-	EXPECT_COMMA_OR_OBJ_END: 3,
-	EXPECT_COMMA_OR_ARR_END: 4,
-	IN_STRING: 5,
-	IN_NUMBER: 6,
-	IN_LITERAL: 7,
-	DONE: 8,
-} as const;
+type StreamingJsonDelta =
+	| [0, string, (string | number)[][]] // Replace skeleton: skeleton, activePaths
+	| [1, (string | number)[], string] // Append string: path, suffix
+	| [2] // Fallback
+	| [3, (string | number)[], string]; // Set string: path, text
+
+export interface NativeStreamingJsonParser {
+	append(chunk: string): string;
+}
+
+let nativeFactory: (() => NativeStreamingJsonParser) | undefined;
+
+export function setNativeStreamingJsonParser(factory: (() => NativeStreamingJsonParser) | undefined) {
+	nativeFactory = factory;
+}
 
 export class StreamingJsonParser<T = any> {
+	private parsedAst: T = {} as T;
+	private nativeParser?: NativeStreamingJsonParser;
 	private buffer = "";
-	private index = 0;
+	private hasFallback = false;
 
-	private root: any = undefined;
-	private hasRoot = false;
-
-	private stack: StackItem[] = [];
-	private state: State = State.EXPECT_VALUE;
-
-	private strBuf = "";
-	private strTarget: "key" | "value" = "value";
-	private isEscape = false;
-	private unicodeBuf = "";
-
-	private numBuf = "";
-	private litBuf = "";
-
-	public get parsed(): T {
-		return (this.hasRoot ? this.root : {}) as T;
+	constructor() {
+		this.nativeParser = nativeFactory?.();
 	}
 
 	public append(delta: string): void {
 		this.buffer += delta;
-		this.parseIncremental();
-	}
 
-	private pushValue(val: any) {
-		if (this.stack.length === 0) {
-			this.root = val;
-			this.hasRoot = true;
-		} else {
-			const top = this.stack[this.stack.length - 1];
-			if (top.type === "object") {
-				top.obj[top.key!] = val;
-			} else {
-				top.arr.push(val);
-			}
+		if (this.hasFallback || !this.nativeParser) {
+			this.parsedAst = parseStreamingJson(this.buffer);
+			return;
 		}
-	}
 
-	private updateValue(val: any) {
-		if (this.stack.length === 0) {
-			this.root = val;
-		} else {
-			const top = this.stack[this.stack.length - 1];
-			if (top.type === "object") {
-				top.obj[top.key!] = val;
-			} else {
-				top.arr[top.arr.length - 1] = val;
-			}
+		let opsStr: string;
+		try {
+			opsStr = this.nativeParser.append(delta);
+		} catch (_error) {
+			this.hasFallback = true;
+			this.parsedAst = parseStreamingJson(this.buffer);
+			return;
 		}
-	}
 
-	private afterValue() {
-		if (this.stack.length === 0) {
-			this.state = State.DONE;
-		} else {
-			const top = this.stack[this.stack.length - 1];
-			if (top.type === "object") {
-				this.state = State.EXPECT_COMMA_OR_OBJ_END;
-			} else {
-				this.state = State.EXPECT_COMMA_OR_ARR_END;
-			}
-		}
-	}
-
-	private parseIncremental() {
-		while (this.index < this.buffer.length) {
-			const c = this.buffer[this.index];
-
-			switch (this.state) {
-				case State.EXPECT_VALUE: {
-					if (c === " " || c === "\n" || c === "\r" || c === "\t") {
-						this.index++;
-						break;
-					}
-					if (c === "{") {
-						const obj = {};
-						this.pushValue(obj);
-						this.stack.push({ type: "object", obj, key: null });
-						this.state = State.EXPECT_OBJ_KEY;
-						this.index++;
-					} else if (c === "[") {
-						const arr: any[] = [];
-						this.pushValue(arr);
-						this.stack.push({ type: "array", arr });
-						this.state = State.EXPECT_VALUE;
-						this.index++;
-					} else if (c === '"') {
-						this.strBuf = "";
-						this.strTarget = "value";
-						this.isEscape = false;
-						this.unicodeBuf = "";
-						this.pushValue("");
-						this.state = State.IN_STRING;
-						this.index++;
-					} else if (c === "-" || (c >= "0" && c <= "9")) {
-						this.numBuf = c;
-						this.pushValue(Number(this.numBuf));
-						this.state = State.IN_NUMBER;
-						this.index++;
-					} else if (c === "t" || c === "f" || c === "n") {
-						this.litBuf = c;
-						// optimistic
-						if (c === "t") this.pushValue(true);
-						else if (c === "f") this.pushValue(false);
-						else if (c === "n") this.pushValue(null);
-
-						this.state = State.IN_LITERAL;
-						this.index++;
-					} else if (c === "]") {
-						// Empty array case
-						if (this.stack.length > 0 && this.stack[this.stack.length - 1].type === "array") {
-							this.stack.pop();
-							this.afterValue();
-							this.index++;
-						} else {
-							// Syntax error, ignore or throw
-							this.index++;
-						}
-					} else {
-						// Ignore invalid char
-						this.index++;
-					}
-					break;
-				}
-				case State.EXPECT_OBJ_KEY: {
-					if (c === " " || c === "\n" || c === "\r" || c === "\t") {
-						this.index++;
-						break;
-					}
-					if (c === '"') {
-						this.strBuf = "";
-						this.strTarget = "key";
-						this.isEscape = false;
-						this.unicodeBuf = "";
-						this.state = State.IN_STRING;
-						this.index++;
-					} else if (c === "}") {
-						this.stack.pop();
-						this.afterValue();
-						this.index++;
-					} else {
-						this.index++;
-					}
-					break;
-				}
-				case State.EXPECT_COLON: {
-					if (c === " " || c === "\n" || c === "\r" || c === "\t") {
-						this.index++;
-						break;
-					}
-					if (c === ":") {
-						this.state = State.EXPECT_VALUE;
-						this.index++;
-					} else {
-						this.index++;
-					}
-					break;
-				}
-				case State.EXPECT_COMMA_OR_OBJ_END: {
-					if (c === " " || c === "\n" || c === "\r" || c === "\t") {
-						this.index++;
-						break;
-					}
-					if (c === ",") {
-						this.state = State.EXPECT_OBJ_KEY;
-						this.index++;
-					} else if (c === "}") {
-						this.stack.pop();
-						this.afterValue();
-						this.index++;
-					} else {
-						this.index++;
-					}
-					break;
-				}
-				case State.EXPECT_COMMA_OR_ARR_END: {
-					if (c === " " || c === "\n" || c === "\r" || c === "\t") {
-						this.index++;
-						break;
-					}
-					if (c === ",") {
-						this.state = State.EXPECT_VALUE;
-						this.index++;
-					} else if (c === "]") {
-						this.stack.pop();
-						this.afterValue();
-						this.index++;
-					} else {
-						this.index++;
-					}
-					break;
-				}
-				case State.IN_STRING: {
-					if (this.isEscape) {
-						if (this.unicodeBuf.length !== 0 || c === "u") {
-							if (c === "u" && this.unicodeBuf.length === 0) {
-								this.unicodeBuf = "u";
+		const ops = JSON.parse(opsStr) as StreamingJsonDelta[];
+		for (const op of ops) {
+			if (op[0] === 2) {
+				this.hasFallback = true;
+				this.parsedAst = parseStreamingJson(this.buffer);
+				return;
+			} else if (op[0] === 0) {
+				const newAst = JSON.parse(op[1]);
+				const activePaths = op[2];
+				if (activePaths) {
+					for (const path of activePaths) {
+						let oldCurr: any = this.parsedAst;
+						let newCurr: any = newAst;
+						for (let i = 0; i < path.length - 1; i++) {
+							if (oldCurr && typeof oldCurr === "object" && newCurr && typeof newCurr === "object") {
+								oldCurr = oldCurr[path[i]];
+								newCurr = newCurr[path[i]];
 							} else {
-								this.unicodeBuf += c;
-								if (this.unicodeBuf.length === 5) {
-									this.strBuf += String.fromCharCode(parseInt(this.unicodeBuf.slice(1), 16));
-									this.isEscape = false;
-									this.unicodeBuf = "";
-									if (this.strTarget === "value") this.updateValue(this.strBuf);
-								}
+								oldCurr = undefined;
+								break;
 							}
-						} else {
-							if (c === '"') this.strBuf += '"';
-							else if (c === "\\") this.strBuf += "\\";
-							else if (c === "/") this.strBuf += "/";
-							else if (c === "b") this.strBuf += "\b";
-							else if (c === "f") this.strBuf += "\f";
-							else if (c === "n") this.strBuf += "\n";
-							else if (c === "r") this.strBuf += "\r";
-							else if (c === "t") this.strBuf += "\t";
-							else this.strBuf += `\\${c}`;
-							this.isEscape = false;
-							if (this.strTarget === "value") this.updateValue(this.strBuf);
 						}
-					} else {
-						if (c === "\\") {
-							this.isEscape = true;
-						} else if (c === '"') {
-							if (this.strTarget === "key") {
-								const top = this.stack[this.stack.length - 1];
-								if (top.type === "object") {
-									top.key = this.strBuf;
-									// initialize value to null
-									top.obj[top.key] = null;
-								}
-								this.state = State.EXPECT_COLON;
-							} else {
-								this.updateValue(this.strBuf);
-								this.afterValue();
+						if (oldCurr && typeof oldCurr === "object" && newCurr && typeof newCurr === "object") {
+							const last = path[path.length - 1];
+							if (oldCurr[last] !== undefined) {
+								newCurr[last] = oldCurr[last];
 							}
-						} else {
-							this.strBuf += c;
-							if (this.strTarget === "value") this.updateValue(this.strBuf);
 						}
 					}
-					this.index++;
-					break;
 				}
-				case State.IN_NUMBER: {
-					if ((c >= "0" && c <= "9") || c === "." || c === "e" || c === "E" || c === "+" || c === "-") {
-						this.numBuf += c;
-						const num = Number(this.numBuf);
-						if (!Number.isNaN(num)) {
-							this.updateValue(num);
-						}
-						this.index++;
+				this.parsedAst = newAst;
+			} else if (op[0] === 1 || op[0] === 3) {
+				const path = op[1];
+				let current: any = this.parsedAst;
+				for (let i = 0; i < path.length - 1; i++) {
+					if (current && typeof current === "object") {
+						current = current[path[i]];
+					}
+				}
+				const last = path[path.length - 1];
+				if (current && typeof current === "object") {
+					if (op[0] === 1) {
+						current[last] = (current[last] || "") + op[2];
 					} else {
-						this.afterValue();
-						// DO NOT increment index, let the new state handle `c`
+						current[last] = op[2];
 					}
-					break;
-				}
-				case State.IN_LITERAL: {
-					if (c >= "a" && c <= "z") {
-						this.litBuf += c;
-						// check if complete
-						if (this.litBuf === "true") {
-							this.updateValue(true);
-						} else if (this.litBuf === "false") {
-							this.updateValue(false);
-						} else if (this.litBuf === "null") {
-							this.updateValue(null);
-						}
-						this.index++;
-					} else {
-						this.afterValue();
-					}
-					break;
-				}
-				case State.DONE: {
-					this.index++;
-					break;
 				}
 			}
 		}
+	}
+
+	public get parsed(): T {
+		return this.parsedAst;
 	}
 }
